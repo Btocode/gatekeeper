@@ -127,9 +127,10 @@ class UIState:
     registry: SessionRegistry
     history:  list[HistoryEntry] = field(default_factory=list)
 
-    focus:       int  = FOCUS_QUEUE
-    q_cursor:    int  = 0
-    s_cursor:    int  = 0
+    focus:              int  = FOCUS_QUEUE
+    q_cursor:           int  = 0
+    s_cursor:           int  = 0
+    selected_session_id: str = ""   # authoritative selection — survives reorder
 
     composing:   bool = False
     message_buf: str  = ""
@@ -153,9 +154,19 @@ class Renderer:
         self.state = state
 
     def draw(self) -> None:
-        st = self.state
-        h  = term.height
-        w  = term.width
+        st       = self.state
+        h        = term.height
+        w        = term.width
+        sessions = st.registry.active()
+
+        # Keep s_cursor tracking the selected session by ID (survives reorder)
+        if st.selected_session_id and sessions:
+            for i, s in enumerate(sessions):
+                if s.session_id == st.selected_session_id:
+                    st.s_cursor = i
+                    break
+        elif sessions and not st.selected_session_id:
+            st.selected_session_id = sessions[0].session_id
 
         # Column widths — all pure ints, no ANSI involved in arithmetic
         lw = max(24, min(28, w // 5))
@@ -168,7 +179,7 @@ class Renderer:
         E(term.home + BG + term.clear)
 
         self._banner(E, w, st)
-        self._columns(E, h, w, lw, mw, rw, st)
+        self._columns(E, h, w, lw, mw, rw, st, sessions)
         self._footer(E, h, w, st)
 
         if st.composing:
@@ -205,8 +216,7 @@ class Renderer:
 
     # ── column layout ─────────────────────────────────────────────────────────
 
-    def _columns(self, E, h, w, lw, mw, rw, st):
-        sessions = st.registry.active()
+    def _columns(self, E, h, w, lw, mw, rw, st, sessions):
 
         # Header row (row 3)
         lf = BLUE + term.bold if st.focus == FOCUS_SESSIONS else DIM

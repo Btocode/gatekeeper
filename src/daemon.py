@@ -210,13 +210,16 @@ async def run() -> None:
                         elif k.name in ("KEY_ENTER", "\n", "\r") or ks in ("\n", "\r"):
                             msg = state.message_buf.strip()
                             if msg:
-                                sessions = registry.active()
-                                if sessions:
-                                    s = sessions[min(state.s_cursor, len(sessions)-1)]
+                                s = registry.get_by_id(state.selected_session_id)
+                                if s:
                                     ok, method = await send_message(s, msg)
                                     _log({"type": "message", "text": msg,
                                           "session": s.short_id(), "tty": s.tty_path,
                                           "ok": ok, "method": method})
+                                else:
+                                    _log({"type": "message", "text": msg,
+                                          "session": state.selected_session_id, "ok": False,
+                                          "method": "session not found"})
                             state.composing   = False
                             state.message_buf = ""
                             state.dirty = True
@@ -257,6 +260,8 @@ async def run() -> None:
                         sessions = registry.active()
                         if state.s_cursor > 0:
                             state.s_cursor -= 1
+                        if sessions:
+                            state.selected_session_id = sessions[state.s_cursor].session_id
                     state.dirty = True
 
                 elif k.name in ("KEY_DOWN",) or ks == "j":
@@ -267,6 +272,8 @@ async def run() -> None:
                         sessions = registry.active()
                         if state.s_cursor < len(sessions) - 1:
                             state.s_cursor += 1
+                        if sessions:
+                            state.selected_session_id = sessions[state.s_cursor].session_id
                     state.dirty = True
 
                 elif ks in ("a", "A"):
@@ -276,11 +283,9 @@ async def run() -> None:
                     await resolve("deny")
 
                 elif ks in ("l", "L"):
-                    sessions = registry.active()
-                    if sessions:
-                        s = sessions[min(state.s_cursor, len(sessions)-1)]
+                    if state.selected_session_id:
                         state.linking            = True
-                        state.link_session       = s.session_id
+                        state.link_session       = state.selected_session_id
                         state.link_start_window  = await loop.run_in_executor(None, _get_focused_window)
                         state.dirty              = True
 

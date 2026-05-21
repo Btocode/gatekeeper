@@ -97,6 +97,9 @@ class SessionRegistry:
         if terminal_pid: s.terminal_pid = terminal_pid
         return s
 
+    def get_by_id(self, session_id: str) -> "Session | None":
+        return self._map.get(session_id)
+
     def active(self) -> list[Session]:
         return sorted(
             [s for s in self._map.values() if s.is_active()],
@@ -254,35 +257,72 @@ def _x11_inject(window_id: int, text: str) -> bool:
 
 # ── send message ──────────────────────────────────────────────────────────────
 
+SESSIONS_DIR = os.path.expanduser("~/.claude/sessions")
+
+
 def discover_running_sessions(registry: "SessionRegistry") -> None:
     """
-    Scan running `claude` processes and pre-populate the registry so sessions
-    appear immediately on daemon start without waiting for a hook call.
+    Read Claude's own session files from ~/.claude/sessions/ to get real
+    session IDs, CWDs, and statuses. Falls back to ps scan if dir missing.
     """
-    try:
-        r = subprocess.run(
-            ["ps", "-C", "claude", "-o", "pid=,tty="],
-            capture_output=True, text=True, timeout=3,
-        )
-        for line in r.stdout.strip().splitlines():
-            parts = line.split()
-            if len(parts) < 2:
+    import json as _json
+
+    loaded = False
+    if os.path.isdir(SESSIONS_DIR):
+        for fname in os.listdir(SESSIONS_DIR):
+            if not fname.endswith(".json"):
                 continue
-            pid_str, tty = parts[0].strip(), parts[1].strip()
-            if not pid_str.isdigit() or tty == "?":
+            pid_str = fname[:-5]
+            if not pid_str.isdigit():
                 continue
             pid = int(pid_str)
             try:
-                cwd       = os.readlink(f"/proc/{pid}/cwd")
-                tty_path  = f"/dev/{tty}"
-                term_pid  = find_terminal_pid(pid)
-                # Use pid-based synthetic session_id (prefixed so real sessions override later)
-                session_id = f"pid:{pid}"
+                with open(os.path.join(SESSIONS_DIR, fname)) as f:
+                    data = _json.load(f)
+
+                session_id = data.get("sessionId", f"pid:{pid}")
+                cwd        = data.get("cwd", "")
+                status     = data.get("status", "")
+
+                # Skip exited sessions
+                if status == "exited":
+                    continue
+
+                # Verify process is still running
+                if not os.path.exists(f"/proc/{pid}"):
+                    continue
+
+                tty_path = detect_tty_from_parent(pid)
+                term_pid = find_terminal_pid(pid)
                 registry.touch(session_id, cwd, tty_path, term_pid)
+                loaded = True
             except Exception:
                 continue
-    except Exception:
-        pass
+
+    if not loaded:
+        # Fallback: ps scan with synthetic IDs
+        try:
+            r = subprocess.run(
+                ["ps", "-C", "claude", "-o", "pid=,tty="],
+                capture_output=True, text=True, timeout=3,
+            )
+            for line in r.stdout.strip().splitlines():
+                parts = line.split()
+                if len(parts) < 2:
+                    continue
+                pid_str, tty = parts[0].strip(), parts[1].strip()
+                if not pid_str.isdigit() or tty == "?":
+                    continue
+                pid = int(pid_str)
+                try:
+                    cwd      = os.readlink(f"/proc/{pid}/cwd")
+                    tty_path = f"/dev/{tty}"
+                    term_pid = find_terminal_pid(pid)
+                    registry.touch(f"pid:{pid}", cwd, tty_path, term_pid)
+                except Exception:
+                    continue
+        except Exception:
+            pass
 
 
 def list_injectable_windows(terminal_pid: int) -> list[tuple[int, str]]:
