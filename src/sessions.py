@@ -155,37 +155,64 @@ def _x11_windows_for_pid(pid: int) -> list[tuple[int, str]]:
 
 
 def _x11_inject(window_id: int, text: str) -> bool:
-    """Send `text` to X11 window as synthetic key events."""
+    """
+    Inject text into an X11 window using XTEST — indistinguishable from real
+    keyboard input (GTK/VTE won't reject it unlike synthetic send_event).
+    Briefly focuses the target window, types, then restores focus.
+    """
     try:
-        from Xlib import display, X, XK, protocol
-        d   = display.Display()
-        win = d.create_resource_object("window", window_id)
+        import time as _time
+        from Xlib import display, X, XK
+        from Xlib.ext import xtest
 
-        def _key(ks: int, shift: bool = False) -> None:
-            kc  = d.keysym_to_keycode(ks)
-            st  = X.ShiftMask if shift else 0
-            kw  = dict(time=X.CurrentTime, root=d.screen().root, window=win,
-                       same_screen=1, child=X.NONE,
-                       root_x=0, root_y=0, event_x=0, event_y=0,
-                       state=st, detail=kc)
-            win.send_event(protocol.event.KeyPress(**kw),   event_mask=X.KeyPressMask)
-            win.send_event(protocol.event.KeyRelease(**kw), event_mask=X.KeyReleaseMask)
+        d    = display.Display()
+        win  = d.create_resource_object("window", window_id)
+
+        # Save current focus
+        prev_focus = d.get_input_focus().focus
+
+        # Focus target window
+        win.set_input_focus(X.RevertToParent, X.CurrentTime)
+        d.flush()
+        _time.sleep(0.05)   # let focus settle
+
+        def _fake(ks: int, shift: bool = False) -> None:
+            kc = d.keysym_to_keycode(ks)
+            if kc == 0:
+                return
+            if shift:
+                xtest.fake_input(d, X.KeyPress,   50)   # Left Shift keycode
+            xtest.fake_input(d, X.KeyPress,   kc)
+            xtest.fake_input(d, X.KeyRelease, kc)
+            if shift:
+                xtest.fake_input(d, X.KeyRelease, 50)
+            d.flush()
 
         for ch in text:
             if ch == "\n":
-                _key(XK.XK_Return)
+                _fake(XK.XK_Return)
             elif ch == " ":
-                _key(XK.XK_space)
+                _fake(XK.XK_space)
             else:
                 ks    = XK.string_to_keysym(ch)
                 shift = ch.isupper() or ch in '!"#$%&\'()*+:<>?@^_{|}~'
                 if ks == 0:
                     ks = XK.string_to_keysym(ch.lower())
-                _key(ks, shift)
+                if ks:
+                    _fake(ks, shift)
 
-        d.flush()
+        _time.sleep(0.02)
+
+        # Restore previous focus
+        try:
+            if prev_focus not in (X.PointerRoot, X.NONE):
+                prev_focus.set_input_focus(X.RevertToParent, X.CurrentTime)
+                d.flush()
+        except Exception:
+            pass
+
         return True
-    except Exception:
+    except Exception as e:
         return False
 
 
