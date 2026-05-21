@@ -86,8 +86,8 @@ async def run() -> None:
     renderer = Renderer(state)
 
     state.kitty_ok        = await loop.run_in_executor(None, kitty_available)
-    state.linking         = False
-    state.daemon_window_id = await loop.run_in_executor(None, _get_own_window)
+    state.linking           = False
+    state.link_start_window = 0
 
     # Pre-populate sessions from running Claude processes
     await loop.run_in_executor(None, discover_running_sessions, registry)
@@ -173,9 +173,9 @@ async def run() -> None:
 
                 # ── focus-to-link mode ────────────────────────────────────────
                 if state.linking:
-                    # Poll which X11 window is currently focused
+                    # Wait until focus moves to a DIFFERENT window than when L was pressed
                     focused = await loop.run_in_executor(None, _get_focused_window)
-                    if focused and focused != state.daemon_window_id:
+                    if focused and focused != state.link_start_window:
                         # User switched to a non-daemon window — link it
                         registry.pin_window(state.link_session, focused)
                         _log({"type": "link", "session": state.link_session,
@@ -274,9 +274,10 @@ async def run() -> None:
                     sessions = registry.active()
                     if sessions:
                         s = sessions[min(state.s_cursor, len(sessions)-1)]
-                        state.linking      = True
-                        state.link_session = s.session_id
-                        state.dirty        = True
+                        state.linking            = True
+                        state.link_session       = s.session_id
+                        state.link_start_window  = await loop.run_in_executor(None, _get_focused_window)
+                        state.dirty              = True
 
                 elif ks in ("m", "M"):
                     sessions = registry.active()
