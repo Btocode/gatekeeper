@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from src.protocol import HistoryEntry, Request, SOCKET_PATH
 from src.server import RequestQueue, serve_unix_socket
 from src.sessions import (SessionRegistry, kitty_available, send_message_to_session,
-                          list_injectable_windows, discover_running_sessions)
+                          list_injectable_windows, discover_running_sessions, is_dangerous)
 from src.ui import FOCUS_QUEUE, FOCUS_SESSIONS, Renderer, UIState, term
 
 
@@ -104,8 +104,9 @@ async def run() -> None:
     async def on_request(request: Request, writer: asyncio.StreamWriter) -> None:
         registry.touch(request.session_id, request.cwd,
                        request.tty_path, request.terminal_pid)
-        # Auto-approve if session is flagged
-        if registry.is_auto_approve(request.session_id):
+        # Auto-approve if session is flagged — but never for dangerous commands
+        danger, reason = is_dangerous(request.tool_name, request.tool_input)
+        if registry.is_auto_approve(request.session_id) and not danger:
             resp = json.dumps({"decision": "allow"}) + "\n"
             if writer and not writer.is_closing():
                 try:

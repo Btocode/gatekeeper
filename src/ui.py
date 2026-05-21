@@ -17,7 +17,7 @@ import blessed
 
 from src.protocol import HistoryEntry, Request
 from src.server import RequestQueue
-from src.sessions import Session, SessionRegistry
+from src.sessions import Session, SessionRegistry, is_dangerous
 
 term = blessed.Terminal()
 
@@ -377,6 +377,13 @@ class Renderer:
                 if shown >= max_cmd_lines:
                     break
         dl.append("")
+
+        # Danger warning
+        danger, danger_reason = is_dangerous(r.tool_name, r.tool_input)
+        if danger:
+            dl.append(f"  {term.on_color_rgb(80,0,0)}{RED}{term.bold} !! DANGEROUS — manual approval required !! {term.normal}")
+            dl.append(f"  {RED}{_clamp(danger_reason, inner-2)}{term.normal}")
+            dl.append("")
 
         # Action row
         ab = f"{term.on_color_rgb(15,44,28)}{GREEN}{term.bold} A:ALLOW {term.normal}"

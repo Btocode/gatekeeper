@@ -13,6 +13,109 @@ import os
 import re
 import subprocess
 import time
+from typing import Any
+
+
+# ── danger patterns ───────────────────────────────────────────────────────────
+# Commands matching any of these are NEVER auto-approved regardless of session
+# settings. They must go through manual approval every time.
+
+_DANGER_PATTERNS: list[re.Pattern] = [p for p in (re.compile(x, re.IGNORECASE) for x in [
+    # Filesystem destruction
+    r'\brm\b',
+    r'\brmdir\b',
+    r'\bshred\b',
+    r'\btruncate\b',
+    r'>\s*/dev/',                   # overwrite device files
+
+    # Database destructive ops
+    r'\bDROP\s+(TABLE|DATABASE|SCHEMA|INDEX|VIEW|FUNCTION|PROCEDURE|TRIGGER)\b',
+    r'\bDELETE\s+FROM\b',
+    r'\bTRUNCATE\b',
+    r'\bALTER\s+TABLE\b',
+    r'\bDROP\s+COLUMN\b',
+    r'\bUPDATE\b.+\bSET\b',        # UPDATE ... SET (broad but catches most mutations)
+    r'\bmongo.*drop\b',
+    r'\bredis-cli.*flushall\b',
+    r'\bredis-cli.*flushdb\b',
+
+    # SSH / remote access
+    r'\bssh\b',
+    r'\bscp\b',
+    r'\brsync\b',
+    r'\bsftp\b',
+    r'\bansible\b',
+    r'\bterraform\s+(apply|destroy)\b',
+    r'\bkubectl\s+(delete|apply|replace|patch|drain|cordon)\b',
+    r'\bdocker\s+(rm|rmi|kill|stop|prune|system\s+prune)\b',
+
+    # Server / service management
+    r'\bsystemctl\s+(stop|disable|mask|kill|restart)\b',
+    r'\bservice\s+\w+\s+(stop|restart|kill)\b',
+    r'\bkill\b',
+    r'\bkillall\b',
+    r'\bpkill\b',
+
+    # Privilege escalation
+    r'\bsudo\b',
+    r'\bsu\s+',
+    r'\bchmod\b',
+    r'\bchown\b',
+
+    # Package / environment destructive
+    r'\bapt(-get)?\s+remove\b',
+    r'\bapt(-get)?\s+purge\b',
+    r'\bpip\s+uninstall\b',
+    r'\bnpm\s+uninstall\b',
+
+    # Network / firewall
+    r'\biptables\b',
+    r'\bufw\b',
+    r'\bnftables\b',
+
+    # Disk / partition
+    r'\bdd\s+',
+    r'\bmkfs\b',
+    r'\bfdisk\b',
+    r'\bparted\b',
+    r'\bformat\b',
+
+    # Git destructive
+    r'\bgit\s+(push\s+.*--force|reset\s+--hard|clean\s+-f|branch\s+-[dD])\b',
+])]
+
+
+def is_dangerous(tool_name: str, tool_input: dict[str, Any]) -> tuple[bool, str]:
+    """
+    Return (True, reason) if this tool call must not be auto-approved.
+    Checks the command/content against known destructive patterns.
+    """
+    # Extract the text to check based on tool type
+    text = ""
+    if tool_name == "Bash":
+        text = tool_input.get("command", "")
+    elif tool_name in ("Edit", "Write"):
+        # Check file path for sensitive locations
+        path = tool_input.get("file_path", "")
+        sensitive = ["/etc/", "/usr/", "/bin/", "/sbin/", "/boot/",
+                     "/var/", "/sys/", "/proc/", "~/.ssh/", "~/.aws/"]
+        for s in sensitive:
+            if path.startswith(s) or path.startswith(os.path.expanduser(s)):
+                return True, f"write to sensitive path: {path}"
+        # Also check content for SQL mutations
+        text = tool_input.get("new_string", "") or tool_input.get("content", "")
+    elif tool_name == "Agent":
+        text = str(tool_input.get("prompt", ""))
+
+    if not text:
+        return False, ""
+
+    for pattern in _DANGER_PATTERNS:
+        m = pattern.search(text)
+        if m:
+            return True, f"matched dangerous pattern: {m.group(0)!r}"
+
+    return False, ""
 from dataclasses import dataclass, field
 
 
