@@ -51,12 +51,33 @@ def decide_exit(response: dict[str, Any]) -> int | tuple[int, str]:
     return 0
 
 
+def ask_in_terminal(request: Request) -> int | tuple[int, str]:
+    """Fallback: ask directly in the Claude terminal when daemon is not running."""
+    tool = request.tool_name
+    cmd  = request.summary_command()
+    try:
+        with open("/dev/tty", "r+") as tty:
+            tty.write(f"\n\033[33m[Permission required]\033[0m {tool}: {cmd}\n")
+            tty.write("Allow? [Y/n] ")
+            tty.flush()
+            answer = tty.readline().strip().lower()
+        if answer in ("", "y", "yes"):
+            return 0
+        return 2, f"Denied in terminal: {tool}({cmd})"
+    except Exception:
+        return 0  # can't open tty — allow
+
+
 def main() -> None:
     try:
         hook_input = read_hook_input()
-        request = make_request(hook_input)
-        response = send_request(request)
-        result = decide_exit(response)
+        request    = make_request(hook_input)
+        try:
+            response = send_request(request)
+            result   = decide_exit(response)
+        except Exception:
+            # Daemon not reachable — fall back to terminal prompt
+            result = ask_in_terminal(request)
         if isinstance(result, tuple):
             code, message = result
             print(message)
