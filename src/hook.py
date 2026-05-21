@@ -43,11 +43,16 @@ def make_request(hook_input: dict[str, Any]) -> Request:
 
 
 def send_request(request: Request) -> dict[str, Any]:
+    # GATEKEEPER_TIMEOUT env var lets users set how long to wait for the daemon
+    # before falling back to the terminal Y/n prompt.
+    # Default: 300s (5 min). Set to 0 to always use terminal prompt.
+    wait_timeout = int(os.environ.get("GATEKEEPER_TIMEOUT", "300")) or None
+
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
         sock.settimeout(TIMEOUT_SECS)
         sock.connect(SOCKET_PATH)
-        sock.settimeout(None)  # wait as long as needed for user to respond
+        sock.settimeout(wait_timeout)
         sock.sendall(request.to_json().encode())
         buf = b""
         while b"\n" not in buf:

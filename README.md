@@ -71,6 +71,34 @@ claude-perm-kitty
 
 Start your Claude Code sessions anywhere — other terminals, VS Code, JetBrains, anywhere. Every `Bash`, `Edit`, `Write`, or `Agent` call will appear in Gatekeeper.
 
+### Approving from the Claude terminal instead of Gatekeeper
+
+By default the hook waits up to **5 minutes** for Gatekeeper to respond, then falls back to a `Y/n` prompt directly in the Claude terminal. This means:
+
+| Situation | What happens |
+|-----------|-------------|
+| Gatekeeper running | Request appears in dashboard — approve with `A` / `D` |
+| Gatekeeper not running | `[Permission required] Y/n` prompt appears in Claude terminal |
+| Gatekeeper running, no response in 5 min | Hook times out, falls back to `Y/n` in Claude terminal |
+
+**To approve from the Claude terminal immediately** (skip Gatekeeper for a session):
+
+```bash
+# Set timeout to 0 — always use terminal prompt, ignore daemon
+GATEKEEPER_TIMEOUT=0 claude
+
+# Or set a short timeout (e.g. 10 seconds)
+GATEKEEPER_TIMEOUT=10 claude
+```
+
+**To permanently prefer terminal prompts**, add to `~/.zshrc`:
+
+```bash
+export GATEKEEPER_TIMEOUT=0
+```
+
+**To stop Gatekeeper entirely**, press `Q` in the dashboard — subsequent hook calls fall back to the terminal prompt automatically.
+
 ---
 
 ## Keyboard shortcuts
