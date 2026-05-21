@@ -309,7 +309,7 @@ async def run() -> None:
                                 state.settings_input = ""
                                 state.dirty = True
 
-                    if state.dirty:
+                    if state.dirty or (now - last_draw) > 0.5:
                         renderer.draw()
                         renderer.draw_settings(state)
                         last_draw   = now
@@ -456,6 +456,8 @@ async def run() -> None:
 
                 if state.dirty or (now - last_draw) > 0.5:
                     renderer.draw()
+                    if state.settings_open:
+                        renderer.draw_settings(state)
                     last_draw   = now
                     state.dirty = False
 
