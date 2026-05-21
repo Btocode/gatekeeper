@@ -18,6 +18,7 @@ import blessed
 from src.protocol import HistoryEntry, Request
 from src.server import RequestQueue
 from src.sessions import Session, SessionRegistry, is_dangerous
+from src.config import BASH_CATEGORIES, TOOL_TYPES, GatekeeperConfig
 
 term = blessed.Terminal()
 
@@ -132,8 +133,14 @@ class UIState:
     s_cursor:           int  = 0
     selected_session_id: str = ""   # authoritative selection — survives reorder
 
-    composing:   bool = False
-    message_buf: str  = ""
+    composing:    bool = False
+    message_buf:  str  = ""
+
+    settings_open:   bool = False
+    settings_tab:    int  = 0    # 0=Tools 1=Bash Categories 2=Custom Patterns
+    settings_cursor: int  = 0
+    settings_input:  str  = ""   # for typing custom patterns
+    settings_input_active: bool = False
 
     tick:    int   = 0
     allowed: int   = 0
@@ -437,6 +444,112 @@ class Renderer:
 
     # ── footer ────────────────────────────────────────────────────────────────
 
+    def draw_settings(self, state) -> None:
+        """Full-screen settings overlay."""
+        h, w   = term.height, term.width
+        cfg: GatekeeperConfig = state.config
+        st     = state
+        sw     = min(w - 4, 78)
+        col    = (w - sw) // 2
+        row    = 2
+        inner  = sw - 4
+
+        out: list[str] = []
+        E = out.append
+
+        # Background
+        for r in range(row, h - 1):
+            E(term.move(r, col) + BG2 + " " * sw + term.normal)
+
+        # Header
+        E(term.move(row,   col) + BG2 + DIM + "+" + "-" * (sw-2) + "+" + term.normal)
+        tabs = ["  Tools  ", "  Bash Categories  ", "  Custom Patterns  "]
+        tab_row = "| "
+        for i, t in enumerate(tabs):
+            if i == st.settings_tab:
+                tab_row += BLUE + term.bold + t + term.normal + BG2 + " "
+            else:
+                tab_row += DIM + t + term.normal + " "
+        E(term.move(row+1, col) + BG2 + BLUE + term.bold
+          + _pad("| ✦ GATEKEEPER SETTINGS", sw-1) + "|" + term.normal)
+        E(term.move(row+2, col) + BG2 + _pad(tab_row, sw-1) + DIM + "|" + term.normal)
+        E(term.move(row+3, col) + BG2 + DIM + "+" + "-" * (sw-2) + "+" + term.normal)
+
+        r = row + 4
+
+        # ── Tab 0: Tool types ──────────────────────────────────────────────
+        if st.settings_tab == 0:
+            tools = list(TOOL_TYPES.items())
+            for i, (tool_key, meta) in enumerate(tools):
+                sel    = i == st.settings_cursor
+                bg     = BG3 if sel else BG2
+                check  = f"{GREEN}[x]{term.normal}" if tool_key in cfg.allowed_tools else f"{DIM}[ ]{term.normal}"
+                arr    = f"{BLUE}>{term.normal}" if sel else " "
+                desc   = _clamp(meta["description"], inner - 28)
+                line   = f"  {arr} {check}  {term.bold}{meta['label']:<18}{term.normal}  {DIM}{desc}{term.normal}"
+                E(term.move(r, col) + bg + _pad(line, sw) + term.normal)
+                r += 1
+            E(term.move(r, col) + BG2 + " " * sw + term.normal); r += 1
+            E(term.move(r, col) + BG2 + DIM
+              + _pad("|  Space/Enter = toggle", sw-1) + "|" + term.normal)
+
+        # ── Tab 1: Bash categories ─────────────────────────────────────────
+        elif st.settings_tab == 1:
+            cats = list(BASH_CATEGORIES.items())
+            for i, (cat_key, meta) in enumerate(cats):
+                sel   = i == st.settings_cursor
+                bg    = BG3 if sel else BG2
+                check = f"{GREEN}[x]{term.normal}" if cat_key in cfg.allowed_bash_categories else f"{DIM}[ ]{term.normal}"
+                arr   = f"{BLUE}>{term.normal}" if sel else " "
+                desc  = _clamp(meta["description"], inner - 28)
+                line  = f"  {arr} {check}  {term.bold}{meta['label']:<22}{term.normal}  {DIM}{desc}{term.normal}"
+                E(term.move(r, col) + bg + _pad(line, sw) + term.normal)
+                r += 1
+            E(term.move(r, col) + BG2 + " " * sw + term.normal); r += 1
+            E(term.move(r, col) + BG2 + DIM
+              + _pad("|  Space/Enter = toggle", sw-1) + "|" + term.normal)
+
+        # ── Tab 2: Custom patterns ─────────────────────────────────────────
+        elif st.settings_tab == 2:
+            sections = [
+                ("Allow patterns (glob)", cfg.custom_allow_patterns),
+                ("Deny patterns (glob)",  cfg.custom_deny_patterns),
+                ("Allowed edit dirs",     cfg.allowed_edit_dirs),
+            ]
+            for sec_label, items in sections:
+                E(term.move(r, col) + BG2 + YELLOW + term.bold
+                  + _pad(f"|  {sec_label}", sw-1) + "|" + term.normal)
+                r += 1
+                if items:
+                    for item in items:
+                        line = f"|    {DIM}• {_clamp(item, inner - 4)}{term.normal}"
+                        E(term.move(r, col) + BG2 + _pad(line, sw-1) + DIM + "|" + term.normal)
+                        r += 1
+                else:
+                    E(term.move(r, col) + BG2 + DIM
+                      + _pad("|    (none)", sw-1) + "|" + term.normal)
+                    r += 1
+                E(term.move(r, col) + BG2 + " " * sw + term.normal); r += 1
+
+            # Input box
+            E(term.move(r, col) + BG2 + DIM + "+" + "-" * (sw-2) + "+" + term.normal); r += 1
+            prompt = f"| Add pattern:  {FG}{st.settings_input}{DIM}_"
+            E(term.move(r, col) + BG2 + _pad(prompt, sw-1) + "|" + term.normal); r += 1
+            hint = ("|  a=add allow  b=add deny  d=add dir  "
+                    "Del=remove last  Enter=confirm")
+            E(term.move(r, col) + BG2 + DIM + _pad(hint, sw-1) + "|" + term.normal)
+
+        # Footer
+        foot_r = h - 3
+        E(term.move(foot_r, col) + BG2 + DIM + "+" + "-" * (sw-2) + "+" + term.normal)
+        E(term.move(foot_r+1, col) + BG2 + DIM
+          + _pad("|  Tab = next section    Esc / S = close & save", sw-1)
+          + "|" + term.normal)
+        E(term.move(foot_r+2, col) + BG2 + DIM + "+" + "-" * (sw-2) + "+" + term.normal)
+
+        sys.stdout.write("".join(out))
+        sys.stdout.flush()
+
     def _footer(self, E, h, w, st):
         if st.focus == FOCUS_SESSIONS:
             a_hint = f"  {YELLOW}A{term.normal} toggle auto"
@@ -448,6 +561,7 @@ class Renderer:
                 f"  {RED}D{term.normal} deny"
                 f"  {CYAN}M{term.normal} message"
                 f"  {YELLOW}L{term.normal} link"
+                f"  {MAGENTA}S{term.normal} settings"
                 f"  {DIM}Q{term.normal} quit")
         E(term.move(h-2, 0) + BG2 + _pad(keys, w) + term.normal)
         E(term.move(h-1, 0) + BG2 + " " * w + term.normal)

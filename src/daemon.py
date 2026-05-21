@@ -26,6 +26,7 @@ from src.protocol import HistoryEntry, Request, SOCKET_PATH
 from src.server import RequestQueue, serve_unix_socket
 from src.sessions import (SessionRegistry, kitty_available, send_message_to_session,
                           list_injectable_windows, discover_running_sessions, is_dangerous)
+from src.config import GatekeeperConfig, load_config, save_config, check_global_rules
 from src.ui import FOCUS_QUEUE, FOCUS_SESSIONS, Renderer, UIState, term
 
 
@@ -90,9 +91,11 @@ async def run() -> None:
     state    = UIState(queue=queue, registry=registry)
     renderer = Renderer(state)
 
-    state.kitty_ok        = await loop.run_in_executor(None, kitty_available)
+    state.kitty_ok          = await loop.run_in_executor(None, kitty_available)
     state.linking           = False
     state.link_start_window = 0
+    state.config            = load_config()
+    state.settings_open     = False
     # Record which window is focused when the daemon starts — this is the
     # daemon's own terminal. Never link to it.
     state.daemon_window_id  = await loop.run_in_executor(None, _get_focused_window)
@@ -109,7 +112,39 @@ async def run() -> None:
     async def on_request(request: Request, writer: asyncio.StreamWriter) -> None:
         registry.touch(request.session_id, request.cwd,
                        request.tty_path, request.terminal_pid)
-        # Auto-approve if session is flagged — but never for dangerous commands
+
+        # 1. Check global config rules (user-defined allow/deny)
+        global_verdict, global_reason = check_global_rules(
+            request.tool_name, request.tool_input, state.config
+        )
+        if global_verdict == "deny":
+            if writer and not writer.is_closing():
+                try:
+                    writer.write((json.dumps({"decision": "deny",
+                                              "reason": global_reason}) + "\n").encode())
+                    await writer.drain()
+                    writer.close()
+                    await writer.wait_closed()
+                except Exception:
+                    pass
+            _log({"type": "global_deny", "session": request.session_id[:8],
+                  "tool": request.tool_name, "reason": global_reason})
+            return
+        if global_verdict == "allow":
+            queue.remove(request.id)
+            if writer and not writer.is_closing():
+                try:
+                    writer.write((json.dumps({"decision": "allow"}) + "\n").encode())
+                    await writer.drain()
+                    writer.close()
+                    await writer.wait_closed()
+                except Exception:
+                    pass
+            _log({"type": "global_allow", "session": request.session_id[:8],
+                  "tool": request.tool_name, "reason": global_reason})
+            return
+
+        # 2. Auto-approve if session is flagged — but never for dangerous commands
         danger, _ = is_dangerous(request.tool_name, request.tool_input)
         if registry.is_auto_approve(request.session_id) and not danger:
             # Remove from queue immediately (server.py adds before this callback fires)
@@ -195,6 +230,91 @@ async def run() -> None:
                 # ── periodic session rescan (every 30s) ───────────────────────
                 if state.tick % 600 == 0:   # 600 * 50ms = 30s
                     await loop.run_in_executor(None, discover_running_sessions, registry)
+
+                # ── settings mode ─────────────────────────────────────────────
+                if state.settings_open:
+                    cfg = state.config
+                    from src.config import BASH_CATEGORIES, TOOL_TYPES, save_config
+                    tool_keys = list(TOOL_TYPES.keys())
+                    cat_keys  = list(BASH_CATEGORIES.keys())
+
+                    if k:
+                        ks2 = str(k)
+                        if k.name == "KEY_ESCAPE" or ks2 in ("s", "S"):
+                            save_config(cfg)
+                            state.settings_open = False
+                            state.dirty = True
+
+                        elif k.name == "KEY_TAB" or ks2 == "\t":
+                            state.settings_tab    = (state.settings_tab + 1) % 3
+                            state.settings_cursor = 0
+                            state.dirty = True
+
+                        elif k.name in ("KEY_UP",) or ks2 == "k":
+                            if state.settings_cursor > 0:
+                                state.settings_cursor -= 1
+                                state.dirty = True
+
+                        elif k.name in ("KEY_DOWN",) or ks2 == "j":
+                            max_idx = (len(tool_keys) if state.settings_tab == 0
+                                       else len(cat_keys) if state.settings_tab == 1
+                                       else 0) - 1
+                            if state.settings_cursor < max_idx:
+                                state.settings_cursor += 1
+                                state.dirty = True
+
+                        elif k.name in ("KEY_ENTER", "\n") or ks2 in ("\n", "\r", " "):
+                            if state.settings_tab == 0:
+                                key = tool_keys[state.settings_cursor]
+                                if key in cfg.allowed_tools:
+                                    cfg.allowed_tools.discard(key)
+                                else:
+                                    cfg.allowed_tools.add(key)
+                                state.dirty = True
+                            elif state.settings_tab == 1:
+                                key = cat_keys[state.settings_cursor]
+                                if key in cfg.allowed_bash_categories:
+                                    cfg.allowed_bash_categories.discard(key)
+                                else:
+                                    cfg.allowed_bash_categories.add(key)
+                                state.dirty = True
+                            elif state.settings_tab == 2:
+                                # confirm input
+                                pass
+
+                        elif state.settings_tab == 2:
+                            if k.name == "KEY_BACKSPACE" or ks2 == "\x7f":
+                                state.settings_input = state.settings_input[:-1]
+                                state.dirty = True
+                            elif ks2 == "a" and not state.settings_input:
+                                state.settings_input = "ALLOW:"
+                                state.dirty = True
+                            elif ks2 == "b" and not state.settings_input:
+                                state.settings_input = "DENY:"
+                                state.dirty = True
+                            elif ks2 == "d" and not state.settings_input:
+                                state.settings_input = "DIR:"
+                                state.dirty = True
+                            elif ks2 and ks2.isprintable():
+                                state.settings_input += ks2
+                                state.dirty = True
+                            elif k.name in ("KEY_ENTER",) or ks2 in ("\n", "\r"):
+                                val = state.settings_input.strip()
+                                if val.startswith("ALLOW:"):
+                                    cfg.custom_allow_patterns.append(val[6:].strip())
+                                elif val.startswith("DENY:"):
+                                    cfg.custom_deny_patterns.append(val[5:].strip())
+                                elif val.startswith("DIR:"):
+                                    cfg.allowed_edit_dirs.append(val[4:].strip())
+                                state.settings_input = ""
+                                state.dirty = True
+
+                    if state.dirty or (now - last_draw) > 0.1:
+                        renderer.draw()
+                        renderer.draw_settings(state)
+                        last_draw   = now
+                        state.dirty = False
+                    continue
 
                 # ── focus-to-link mode ────────────────────────────────────────
                 if state.linking:
@@ -326,6 +446,13 @@ async def run() -> None:
                         state.message_buf = ""
                         state.focus       = FOCUS_SESSIONS
                         state.dirty       = True
+
+                elif ks in ("s", "S"):
+                    state.settings_open     = True
+                    state.settings_tab      = 0
+                    state.settings_cursor   = 0
+                    state.settings_input    = ""
+                    state.dirty             = True
 
                 if state.dirty or (now - last_draw) > 0.5:
                     renderer.draw()
