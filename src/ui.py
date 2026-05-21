@@ -348,14 +348,22 @@ class Renderer:
         dl.append(f" {DIM}       {term.normal}  {_age_bar(age, min(inner - 18, 14))}")
         dl.append("")
 
-        # Command box
-        bw = min(inner - 4, 48)
-        dl.append(f"  {DIM}+{'-' * bw}+{term.normal}")
-        for cl in cmd_lines[:7]:
-            dl.append(f"  {DIM}|{term.normal} {FG}{_pad(_clamp(cl, bw - 2), bw - 2)}{term.normal}{DIM}|{term.normal}")
-        if len(cmd_lines) > 7:
-            dl.append(f"  {DIM}| {_clamp(f'... {len(cmd_lines)-7} more lines', bw-2):<{bw-2}} |{term.normal}")
-        dl.append(f"  {DIM}+{'-' * bw}+{term.normal}")
+        # Command — multiline, word-wrapped to fit width
+        dl.append(f" {DIM}Command{term.normal}")
+        max_cmd_lines = 14   # show up to 14 lines
+        shown = 0
+        for cl in cmd_lines:
+            if shown >= max_cmd_lines:
+                dl.append(f"   {DIM}... {len(cmd_lines)-shown} more lines{term.normal}")
+                break
+            # word-wrap long lines
+            while cl:
+                chunk = _clamp(cl, inner - 3)
+                dl.append(f"   {FG}{chunk}{term.normal}")
+                cl = cl[len(chunk):]
+                shown += 1
+                if shown >= max_cmd_lines:
+                    break
         dl.append("")
 
         # Action row
@@ -363,11 +371,7 @@ class Renderer:
         db = f"{term.on_color_rgb(56,18,22)}{RED}{term.bold}  D:DENY  {term.normal}"
         dl.append(f"  {ab}   {db}")
         dl.append("")
-
-        if st.kitty_ok:
-            dl.append(f"  {DIM}M -> send message to session{term.normal}")
-        else:
-            dl.append(f"  {DIM}M -> send via PTY{term.normal}")
+        dl.append(f"  {DIM}M  send message to this session{term.normal}")
 
         return dl
 

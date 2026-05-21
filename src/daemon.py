@@ -37,7 +37,8 @@ async def run() -> None:
     # ── socket server ─────────────────────────────────────────────────────────
 
     async def on_request(request: Request, writer: asyncio.StreamWriter) -> None:
-        registry.touch(request.session_id, request.cwd, request.tty_path)
+        registry.touch(request.session_id, request.cwd,
+                       request.tty_path, request.terminal_pid)
         state.dirty = True
 
     server = await serve_unix_socket(SOCKET_PATH, queue, on_request)

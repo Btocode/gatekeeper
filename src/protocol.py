@@ -15,8 +15,9 @@ class Request:
     tool_name: str
     tool_input: dict[str, Any]
     cwd: str
-    timestamp: float = field(default_factory=time.time)
-    tty_path: str   = ""     # controlling TTY of the Claude process, e.g. /dev/pts/1
+    timestamp:    float = field(default_factory=time.time)
+    tty_path:     str   = ""   # PTY slave path, e.g. /dev/pts/1
+    terminal_pid: int   = 0    # PID of terminal emulator (gnome-terminal etc.)
 
     def age_str(self) -> str:
         elapsed = int(time.time() - self.timestamp)
@@ -42,7 +43,8 @@ class Request:
             "tool_input": self.tool_input,
             "cwd": self.cwd,
             "timestamp": self.timestamp,
-            "tty_path": self.tty_path,
+            "tty_path":     self.tty_path,
+            "terminal_pid": self.terminal_pid,
         }) + "\n"
 
     @classmethod
@@ -56,6 +58,7 @@ class Request:
             cwd=d["cwd"],
             timestamp=d.get("timestamp", time.time()),
             tty_path=d.get("tty_path", ""),
+            terminal_pid=d.get("terminal_pid", 0),
         )
 
 

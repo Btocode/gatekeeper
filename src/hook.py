@@ -14,31 +14,31 @@ def read_hook_input() -> dict[str, Any]:
     return json.load(sys.stdin)
 
 
-def _parent_tty() -> str:
-    """Find the controlling TTY of the Claude process that spawned this hook."""
-    try:
-        ppid = os.getppid()
-        import subprocess
-        r = subprocess.run(
-            ["ps", "-p", str(ppid), "-o", "tty="],
-            capture_output=True, text=True, timeout=1
-        )
-        tty = r.stdout.strip()
-        if tty and tty != "?":
-            return f"/dev/{tty}"
-    except Exception:
-        pass
-    return ""
+def _detect_tty_and_terminal() -> tuple[str, int]:
+    """
+    Detect the Claude process's PTY and the terminal emulator PID.
+    - TTY: read /proc/PPID/stat field 6 (tty_nr) — works even when hook has no TTY
+    - Terminal PID: walk process tree upward from PPID until a terminal is found
+    """
+    import subprocess
+    from src.sessions import detect_tty_from_parent, find_terminal_pid
+
+    ppid     = os.getppid()
+    tty_path = detect_tty_from_parent(ppid)
+    term_pid = find_terminal_pid(ppid)
+    return tty_path, term_pid
 
 
 def make_request(hook_input: dict[str, Any]) -> Request:
+    tty_path, term_pid = _detect_tty_and_terminal()
     return Request(
         id=str(uuid.uuid4()),
         session_id=hook_input.get("session_id", "unknown"),
         tool_name=hook_input.get("tool_name", "unknown"),
         tool_input=hook_input.get("tool_input", {}),
         cwd=hook_input.get("cwd", os.getcwd()),
-        tty_path=_parent_tty(),
+        tty_path=tty_path,
+        terminal_pid=term_pid,
     )
 
 
