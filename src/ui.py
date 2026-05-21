@@ -376,7 +376,12 @@ class Renderer:
         pending = st.queue.pending
 
         if not pending:
-            lines = self._idle_lines(inner, st)
+            # If selected session is waiting for input, show its message
+            sel_session = st.registry.get_by_id(st.selected_session_id)
+            if sel_session and sel_session.waiting_input and sel_session.last_message:
+                lines = self._waiting_lines(sel_session, inner, st)
+            else:
+                lines = self._idle_lines(inner, st)
             line  = lines[ri] if ri < len(lines) else ""
             return BG + _pad(line, w) + term.normal
 
@@ -436,10 +441,57 @@ class Renderer:
 
         return dl
 
+    def _waiting_lines(self, s, inner, st) -> list[str]:
+        """Detail panel content when the selected session is waiting for input."""
+        dl = [
+            "",
+            f" {MAGENTA}{term.bold}Claude is waiting for your input{term.normal}",
+            f" {DIM}Session {s.short_id()}  {s.tty_label()}{term.normal}",
+            f" {DIM}{'─' * (inner - 2)}{term.normal}",
+            "",
+        ]
+        for line in s.last_message.splitlines():
+            if not line.strip():
+                dl.append("")
+                continue
+            while line:
+                chunk = _clamp(line, inner - 2)
+                dl.append(f" {FG}{chunk}{term.normal}")
+                line = line[len(chunk):]
+        dl += [
+            "",
+            f" {DIM}{'─' * (inner - 2)}{term.normal}",
+            f" {CYAN}M{term.normal}{DIM} — type your response and send{term.normal}",
+        ]
+        return dl
+
     def _idle_lines(self, inner, st) -> list[str]:
+        # Check if any session is waiting for input
+        waiting = [s for s in st.registry.active() if s.waiting_input]
+        if waiting:
+            s  = waiting[0]
+            dl = [
+                "",
+                f" {MAGENTA}{term.bold}Claude is waiting for your input{term.normal}",
+                f" {DIM}Session {s.short_id()}{term.normal}",
+                "",
+            ]
+            # Show last message, word-wrapped
+            if s.last_message:
+                for line in s.last_message.splitlines():
+                    while line:
+                        chunk = _clamp(line, inner - 2)
+                        dl.append(f" {FG}{chunk}{term.normal}")
+                        line = line[len(chunk):]
+            dl += [
+                "",
+                f" {DIM}Press {CYAN}M{term.normal}{DIM} to respond{term.normal}",
+            ]
+            return dl
+
         return [
             "",
-            f" {BLUE}{term.bold}[CLAUDE PERMISSION MANAGER]{term.normal}",
+            f" {BLUE}{term.bold}GATEKEEPER{term.normal}",
             "",
             f" {DIM}Listening on:{term.normal}",
             f" {CYAN}/tmp/claude-perm-{os.environ.get('USER','user')}.sock{term.normal}",

@@ -213,9 +213,10 @@ class Session:
     first_seen:    float = field(default_factory=time.time)
     last_seen:     float = field(default_factory=time.time)
     tool_count:    int   = 0
-    last_tool_at:  float = field(default_factory=time.time)  # last hook call
-    waiting_input: bool  = False  # Claude finished and is waiting for user input
-    session_updated_at: int = 0   # last updatedAt from session file (ms timestamp)
+    last_tool_at:  float = field(default_factory=time.time)
+    waiting_input: bool  = False
+    last_message:  str   = ""     # last assistant text when waiting for input
+    session_updated_at: int = 0
 
     def short_id(self)  -> str: return self.session_id[:8]
     def tty_label(self) -> str: return self.tty_path.replace("/dev/", "") if self.tty_path else "?"
@@ -449,9 +450,60 @@ def _x11_inject(window_id: int, text: str) -> bool:
 
 # ── send message ──────────────────────────────────────────────────────────────
 
-SESSIONS_DIR    = os.path.expanduser("~/.claude/sessions")
-# How long after the last tool call before we consider Claude is waiting for input
-WAITING_THRESHOLD = 8.0   # seconds
+SESSIONS_DIR      = os.path.expanduser("~/.claude/sessions")
+PROJECTS_DIR      = os.path.expanduser("~/.claude/projects")
+WAITING_THRESHOLD = 8.0   # seconds after last tool call → assume waiting for input
+
+
+def get_last_assistant_message(session_id: str) -> str:
+    """
+    Read the session transcript and return the last assistant text message.
+    Returns empty string if not found.
+    """
+    import glob, json as _json
+
+    # Transcript files live at ~/.claude/projects/*/SESSION_ID.jsonl
+    pattern = os.path.join(PROJECTS_DIR, "*", f"{session_id}.jsonl")
+    files   = glob.glob(pattern)
+    if not files:
+        return ""
+
+    transcript_path = files[0]
+    last_text = ""
+
+    try:
+        with open(transcript_path, "rb") as f:
+            # Read last 50 KB — enough to find the most recent message
+            f.seek(0, 2)
+            size = f.tell()
+            f.seek(max(0, size - 50_000))
+            chunk = f.read().decode("utf-8", errors="ignore")
+    except Exception:
+        return ""
+
+    # Parse lines in reverse to find last assistant text
+    for line in reversed(chunk.splitlines()):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            d   = _json.loads(line)
+            msg = d.get("message", {})
+            if msg.get("role") != "assistant":
+                continue
+            content = msg.get("content", [])
+            if not isinstance(content, list):
+                continue
+            # Collect all text blocks from this entry (newest first)
+            texts = [c.get("text", "") for c in content
+                     if isinstance(c, dict) and c.get("type") == "text" and c.get("text", "").strip()]
+            if texts:
+                last_text = "\n".join(texts).strip()
+                break
+        except Exception:
+            continue
+
+    return last_text
 
 
 def poll_waiting_sessions(registry: "SessionRegistry") -> None:
@@ -504,9 +556,13 @@ def poll_waiting_sessions(registry: "SessionRegistry") -> None:
         since_update = now - updated_sec
 
         if since_tool >= WAITING_THRESHOLD and since_update < 120:
+            if not s.waiting_input:
+                # Newly detected — fetch the last assistant message
+                s.last_message  = get_last_assistant_message(session_id)
             s.waiting_input = True
         else:
             s.waiting_input = False
+            s.last_message  = ""
 
 
 def discover_running_sessions(registry: "SessionRegistry") -> None:
