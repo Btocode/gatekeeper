@@ -10,6 +10,9 @@ import json
 import os
 import sys
 import time
+from datetime import datetime
+
+LOG_FILE = os.path.expanduser("~/.claude/perm-manager.log")
 
 import blessed
 
@@ -22,6 +25,14 @@ from src.ui import FOCUS_QUEUE, FOCUS_SESSIONS, Renderer, UIState, term
 
 async def _key(loop: asyncio.AbstractEventLoop):
     return await loop.run_in_executor(None, lambda: term.inkey(timeout=0.05))
+
+
+def _log(entry: dict) -> None:
+    try:
+        with open(LOG_FILE, "a") as f:
+            f.write(json.dumps({"ts": datetime.now().isoformat(), **entry}) + "\n")
+    except Exception:
+        pass
 
 
 async def run() -> None:
@@ -65,6 +76,9 @@ async def run() -> None:
             state.allowed += 1
         else:
             state.denied += 1
+        _log({"type": "decision", "decision": decision, "reason": reason,
+              "session": r.session_id[:8], "tool": r.tool_name,
+              "command": r.summary_command()})
         state.history.append(HistoryEntry(
             session_id=r.session_id,
             tool_name=r.tool_name,
@@ -117,8 +131,9 @@ async def run() -> None:
                                 if sessions:
                                     s = sessions[min(state.s_cursor, len(sessions)-1)]
                                     ok, method = await send_message(s, msg)
-                                    # briefly show result in status
-                                    _ = (ok, method)
+                                    _log({"type": "message", "text": msg,
+                                          "session": s.short_id(), "tty": s.tty_path,
+                                          "ok": ok, "method": method})
                             state.composing   = False
                             state.message_buf = ""
                             state.dirty = True
