@@ -166,6 +166,9 @@ class Renderer:
         w        = term.width
         sessions = st.registry.active()
 
+        # Invalidate session row cache on every draw (cheap to rebuild)
+        self._sess_rows_dirty = True
+
         # Keep s_cursor tracking the selected session by ID (survives reorder)
         if st.selected_session_id and sessions:
             for i, s in enumerate(sessions):
@@ -176,9 +179,9 @@ class Renderer:
             st.selected_session_id = sessions[0].session_id
 
         # Column widths — all pure ints, no ANSI involved in arithmetic
-        lw = max(24, min(28, w // 5))
-        mw = max(26, min(34, w // 4))
-        rw = w - lw - mw - 2    # 2 divider chars
+        lw = max(32, min(40, w // 4))      # sessions pane — wider
+        mw = max(26, min(34, w // 5))
+        rw = w - lw - mw - 2              # 2 divider chars
 
         out: list[str] = []
         E = out.append
@@ -261,37 +264,68 @@ class Renderer:
 
     # ── left cell (sessions + history) ────────────────────────────────────────
 
+    def _build_session_rows(self, sessions, w, st) -> list[tuple[str, str]]:
+        """
+        Pre-build all session rows as (bg, content) tuples.
+        Each session gets: header row, wrapped cwd, tty/calls, separator.
+        Long text wraps onto extra lines instead of being truncated.
+        """
+        inner = w - 3
+        rows: list[tuple[str, str]] = []
+
+        for idx, s in enumerate(sessions):
+            sel = (idx == st.s_cursor and st.focus == FOCUS_SESSIONS)
+            bg  = BG3 if sel else BG
+            arr = f"{BLUE}>{term.normal}" if sel else " "
+
+            # Row 1: session ID + badges
+            pin     = f" {GREEN}[linked]{term.normal}"   if s.pinned_window else ""
+            auto    = f" {YELLOW}[auto]{term.normal}"    if st.registry.is_auto_approve(s.session_id) else ""
+            waiting = f" {MAGENTA}[input?]{term.normal}" if s.waiting_input  else ""
+            age     = f"  {DIM}{s.age_str()}{term.normal}"
+            id_line = f"{arr} {CYAN}{term.bold}{s.short_id()}{term.normal}{pin}{auto}{waiting}{age}"
+            rows.append((bg, id_line))
+
+            # Row 2+: cwd — wrap if wider than inner
+            cwd = s.cwd.replace(os.path.expanduser("~"), "~")
+            cwd_prefix = "  "
+            while cwd:
+                chunk = _clamp(cwd, inner - len(cwd_prefix))
+                rows.append((bg, f"{cwd_prefix}{DIM}{chunk}{term.normal}"))
+                cwd = cwd[len(chunk):]
+                cwd_prefix = "    "   # indent continuation lines
+
+            # Row 3: tty + call count
+            rows.append((bg, f"  {DIM}{s.tty_label()}  {s.tool_count} calls{term.normal}"))
+
+            # Separator between sessions (not after last)
+            if idx < len(sessions) - 1:
+                rows.append((BG2, DIM + "-" * w + term.normal))
+
+        return rows
+
     def _left_cell(self, ri, w, total_h, st, sessions) -> str:
         HIST_FIXED = min(8, total_h // 3)
-        sess_h     = total_h - HIST_FIXED - 1   # -1 for divider row
+        sess_h     = total_h - HIST_FIXED - 1
 
-        inner = w - 2
+        # Build session rows on demand (cached via attribute)
+        if not hasattr(self, '_sess_rows_cache') or self._sess_rows_dirty:
+            self._sess_rows_cache = self._build_session_rows(sessions, w, st)
+            self._sess_rows_dirty = False
+
+        sess_rows = self._sess_rows_cache
 
         if ri < sess_h:
-            # Sessions — 3 rows per session
-            idx = ri // 3
-            sub = ri % 3
-            if idx < len(sessions):
-                s   = sessions[idx]
-                sel = (idx == st.s_cursor and st.focus == FOCUS_SESSIONS)
-                bg  = BG3 if sel else BG
-                arr = f"{BLUE}>{term.normal}" if sel else " "
-                if sub == 0:
-                    pin     = f" {GREEN}[linked]{term.normal}"  if s.pinned_window  else ""
-                    auto    = f" {YELLOW}[auto]{term.normal}"   if st.registry.is_auto_approve(s.session_id) else ""
-                    waiting = f" {MAGENTA}[input?]{term.normal}" if s.waiting_input  else ""
-                    line = f"{arr} {CYAN}{term.bold}{s.short_id()}{term.normal}{pin}{auto}{waiting}  {DIM}{s.age_str()}{term.normal}"
-                elif sub == 1:
-                    line = f"  {DIM}{_clamp(s.short_cwd(), inner - 2)}{term.normal}"
-                else:
-                    line = f"  {DIM}{s.tty_label()}  {s.tool_count} calls{term.normal}"
-                return bg + _pad(line, w) + term.normal
+            if ri < len(sess_rows):
+                bg, content = sess_rows[ri]
+                return bg + _pad(content, w) + term.normal
             return BG + " " * w + term.normal
 
         if ri == sess_h:
             return BG2 + DIM + "-" * w + term.normal
 
         # History
+        inner = w - 2
         hi = ri - sess_h - 1
         if hi == 0:
             return BG2 + _pad(f" HISTORY({len(st.history)})", w) + term.normal
