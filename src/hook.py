@@ -68,8 +68,8 @@ def ask_in_terminal(request: Request) -> int | tuple[int, str]:
         return 0  # can't open tty — allow
 
 
-# Tools that are always allowed without asking
-AUTO_ALLOW = {"Read", "TodoRead", "TodoWrite", "NotebookRead"}
+# Only these tools have side effects — everything else auto-allows
+NEEDS_PERMISSION = {"Bash", "Edit", "Write", "NotebookEdit", "Agent"}
 
 
 def main() -> None:
@@ -77,7 +77,7 @@ def main() -> None:
         hook_input = read_hook_input()
         request    = make_request(hook_input)
 
-        if request.tool_name in AUTO_ALLOW:
+        if request.tool_name not in NEEDS_PERMISSION:
             sys.exit(0)
         try:
             response = send_request(request)
