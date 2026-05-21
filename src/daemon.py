@@ -104,6 +104,20 @@ async def run() -> None:
     async def on_request(request: Request, writer: asyncio.StreamWriter) -> None:
         registry.touch(request.session_id, request.cwd,
                        request.tty_path, request.terminal_pid)
+        # Auto-approve if session is flagged
+        if registry.is_auto_approve(request.session_id):
+            resp = json.dumps({"decision": "allow"}) + "\n"
+            if writer and not writer.is_closing():
+                try:
+                    writer.write(resp.encode())
+                    await writer.drain()
+                    writer.close()
+                    await writer.wait_closed()
+                except Exception:
+                    pass
+            _log({"type": "auto_allow", "session": request.session_id[:8],
+                  "tool": request.tool_name, "command": request.summary_command()})
+            return
         state.dirty = True
 
     server = await serve_unix_socket(SOCKET_PATH, queue, on_request)
@@ -277,7 +291,15 @@ async def run() -> None:
                     state.dirty = True
 
                 elif ks in ("a", "A"):
-                    await resolve("allow")
+                    if state.focus == FOCUS_SESSIONS and state.selected_session_id:
+                        # Toggle auto-approve for selected session
+                        enabled = registry.toggle_auto_approve(state.selected_session_id)
+                        _log({"type": "auto_approve_toggle",
+                              "session": state.selected_session_id[:8],
+                              "enabled": enabled})
+                        state.dirty = True
+                    else:
+                        await resolve("allow")
 
                 elif ks in ("d", "D"):
                     await resolve("deny")

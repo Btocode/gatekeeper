@@ -270,8 +270,9 @@ class Renderer:
                 bg  = BG3 if sel else BG
                 arr = f"{BLUE}>{term.normal}" if sel else " "
                 if sub == 0:
-                    pin = f" {GREEN}[linked]{term.normal}" if s.pinned_window else ""
-                    line = f"{arr} {CYAN}{term.bold}{s.short_id()}{term.normal}{pin}  {DIM}{s.age_str()}{term.normal}"
+                    pin  = f" {GREEN}[linked]{term.normal}" if s.pinned_window else ""
+                    auto = f" {YELLOW}[auto]{term.normal}" if st.registry.is_auto_approve(s.session_id) else ""
+                    line = f"{arr} {CYAN}{term.bold}{s.short_id()}{term.normal}{pin}{auto}  {DIM}{s.age_str()}{term.normal}"
                 elif sub == 1:
                     line = f"  {DIM}{_clamp(s.short_cwd(), inner - 2)}{term.normal}"
                 else:
@@ -430,12 +431,16 @@ class Renderer:
     # ── footer ────────────────────────────────────────────────────────────────
 
     def _footer(self, E, h, w, st):
+        if st.focus == FOCUS_SESSIONS:
+            a_hint = f"  {YELLOW}A{term.normal} toggle auto"
+        else:
+            a_hint = f"  {GREEN}A{term.normal} allow"
         keys = (f"  {BLUE}Tab{term.normal} pane"
                 f"  {DIM}jk{term.normal} nav"
-                f"  {GREEN}A{term.normal} allow"
+                + a_hint +
                 f"  {RED}D{term.normal} deny"
                 f"  {CYAN}M{term.normal} message"
-                f"  {YELLOW}L{term.normal} link window"
+                f"  {YELLOW}L{term.normal} link"
                 f"  {DIM}Q{term.normal} quit")
         E(term.move(h-2, 0) + BG2 + _pad(keys, w) + term.normal)
         E(term.move(h-1, 0) + BG2 + " " * w + term.normal)

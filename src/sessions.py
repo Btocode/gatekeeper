@@ -18,7 +18,26 @@ from dataclasses import dataclass, field
 
 # ── session ───────────────────────────────────────────────────────────────────
 
-WINDOW_MAP_FILE = os.path.expanduser("~/.claude/perm-window-map.json")
+WINDOW_MAP_FILE    = os.path.expanduser("~/.claude/perm-window-map.json")
+AUTO_APPROVE_FILE  = os.path.expanduser("~/.claude/perm-auto-approve.json")
+
+
+def load_auto_approve() -> set[str]:
+    try:
+        import json
+        with open(AUTO_APPROVE_FILE) as f:
+            return set(json.load(f))
+    except Exception:
+        return set()
+
+
+def save_auto_approve(s: set[str]) -> None:
+    import json
+    try:
+        with open(AUTO_APPROVE_FILE, "w") as f:
+            json.dump(list(s), f, indent=2)
+    except Exception:
+        pass
 
 
 def load_window_map() -> dict[str, int]:
@@ -72,6 +91,19 @@ class SessionRegistry:
     def __init__(self) -> None:
         self._map: dict[str, Session] = {}
         self._window_map: dict[str, int] = load_window_map()
+        self.auto_approve: set[str] = load_auto_approve()
+
+    def toggle_auto_approve(self, session_id: str) -> bool:
+        """Toggle auto-approve for a session. Returns new state (True = enabled)."""
+        if session_id in self.auto_approve:
+            self.auto_approve.discard(session_id)
+        else:
+            self.auto_approve.add(session_id)
+        save_auto_approve(self.auto_approve)
+        return session_id in self.auto_approve
+
+    def is_auto_approve(self, session_id: str) -> bool:
+        return session_id in self.auto_approve
 
     def pin_window(self, session_id: str, window_id: int) -> None:
         """Explicitly link a session to an X11 window and persist it."""
