@@ -205,14 +205,17 @@ def save_window_map(m: dict[str, int]) -> None:
 
 @dataclass
 class Session:
-    session_id:   str
-    cwd:          str
-    tty_path:     str = ""
-    terminal_pid: int = 0
-    pinned_window: int = 0    # explicitly linked X11 window_id (0 = none)
-    first_seen:   float = field(default_factory=time.time)
-    last_seen:    float = field(default_factory=time.time)
-    tool_count:   int   = 0
+    session_id:    str
+    cwd:           str
+    tty_path:      str   = ""
+    terminal_pid:  int   = 0
+    pinned_window: int   = 0      # explicitly linked X11 window_id (0 = none)
+    first_seen:    float = field(default_factory=time.time)
+    last_seen:     float = field(default_factory=time.time)
+    tool_count:    int   = 0
+    last_tool_at:  float = field(default_factory=time.time)  # last hook call
+    waiting_input: bool  = False  # Claude finished and is waiting for user input
+    session_updated_at: int = 0   # last updatedAt from session file (ms timestamp)
 
     def short_id(self)  -> str: return self.session_id[:8]
     def tty_label(self) -> str: return self.tty_path.replace("/dev/", "") if self.tty_path else "?"
@@ -256,6 +259,13 @@ class SessionRegistry:
         self._window_map[session_id] = window_id
         save_window_map(self._window_map)
 
+    def unpin_window(self, session_id: str) -> None:
+        """Remove the window link for a session."""
+        if session_id in self._map:
+            self._map[session_id].pinned_window = 0
+        self._window_map.pop(session_id, None)
+        save_window_map(self._window_map)
+
     def touch(self, session_id: str, cwd: str,
               tty_path: str = "", terminal_pid: int = 0) -> Session:
         if session_id not in self._map:
@@ -266,9 +276,11 @@ class SessionRegistry:
                 pinned_window=pinned,
             )
         s = self._map[session_id]
-        s.last_seen   = time.time()
-        s.cwd         = cwd
-        s.tool_count += 1
+        s.last_seen    = time.time()
+        s.last_tool_at = time.time()
+        s.cwd          = cwd
+        s.tool_count  += 1
+        s.waiting_input = False   # reset on any tool call
         if tty_path:     s.tty_path     = tty_path
         if terminal_pid: s.terminal_pid = terminal_pid
         return s
@@ -433,7 +445,64 @@ def _x11_inject(window_id: int, text: str) -> bool:
 
 # ── send message ──────────────────────────────────────────────────────────────
 
-SESSIONS_DIR = os.path.expanduser("~/.claude/sessions")
+SESSIONS_DIR    = os.path.expanduser("~/.claude/sessions")
+# How long after the last tool call before we consider Claude is waiting for input
+WAITING_THRESHOLD = 8.0   # seconds
+
+
+def poll_waiting_sessions(registry: "SessionRegistry") -> None:
+    """
+    Read ~/.claude/sessions/*.json and detect sessions where Claude has
+    finished responding and is waiting for user input.
+
+    Heuristic: session file's updatedAt changed more recently than our
+    last tool call for that session, AND at least WAITING_THRESHOLD seconds
+    have passed since the last tool call.
+    """
+    import json as _json
+
+    if not os.path.isdir(SESSIONS_DIR):
+        return
+
+    for fname in os.listdir(SESSIONS_DIR):
+        if not fname.endswith(".json"):
+            continue
+        pid_str = fname[:-5]
+        if not pid_str.isdigit():
+            continue
+
+        try:
+            with open(os.path.join(SESSIONS_DIR, fname)) as f:
+                data = _json.load(f)
+        except Exception:
+            continue
+
+        session_id  = data.get("sessionId", "")
+        updated_ms  = data.get("updatedAt", 0)
+        status      = data.get("status", "")
+
+        if not session_id or session_id not in registry._map:
+            continue
+
+        s = registry._map[session_id]
+
+        # Skip if session file hasn't changed since we last saw it
+        if updated_ms <= s.session_updated_at:
+            continue
+
+        s.session_updated_at = updated_ms
+        updated_sec = updated_ms / 1000.0
+        now         = time.time()
+
+        # If updatedAt is recent AND no tool call in WAITING_THRESHOLD seconds
+        # → Claude responded and is likely waiting for user input
+        since_tool   = now - s.last_tool_at
+        since_update = now - updated_sec
+
+        if since_tool >= WAITING_THRESHOLD and since_update < 120:
+            s.waiting_input = True
+        else:
+            s.waiting_input = False
 
 
 def discover_running_sessions(registry: "SessionRegistry") -> None:

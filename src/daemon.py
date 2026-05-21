@@ -25,7 +25,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from src.protocol import HistoryEntry, Request, SOCKET_PATH
 from src.server import RequestQueue, serve_unix_socket
 from src.sessions import (SessionRegistry, kitty_available, send_message_to_session,
-                          list_injectable_windows, discover_running_sessions, is_dangerous)
+                          list_injectable_windows, discover_running_sessions,
+                          is_dangerous, poll_waiting_sessions)
 from src.config import GatekeeperConfig, load_config, save_config, check_global_rules
 from src.ui import FOCUS_QUEUE, FOCUS_SESSIONS, Renderer, UIState, term
 
@@ -227,7 +228,10 @@ async def run() -> None:
                 if state.tick % 8 == 0 and not state.settings_open and not state.linking:
                     state.dirty = True   # drive animations + age updates
 
-                # ── periodic session rescan (every 30s) ───────────────────────
+                # ── periodic rescan + input-waiting poll (every 4s) ───────────
+                if state.tick % 80 == 0:    # 80 * 50ms = 4s
+                    await loop.run_in_executor(None, poll_waiting_sessions, registry)
+                    state.dirty = True
                 if state.tick % 600 == 0:   # 600 * 50ms = 30s
                     await loop.run_in_executor(None, discover_running_sessions, registry)
 
@@ -431,6 +435,11 @@ async def run() -> None:
 
                 elif ks in ("d", "D"):
                     await resolve("deny")
+
+                elif ks in ("u", "U"):
+                    if state.selected_session_id:
+                        registry.unpin_window(state.selected_session_id)
+                        state.dirty = True
 
                 elif ks in ("l", "L"):
                     if state.selected_session_id:
