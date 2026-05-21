@@ -19,7 +19,8 @@ import blessed
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from src.protocol import HistoryEntry, Request, SOCKET_PATH
 from src.server import RequestQueue, serve_unix_socket
-from src.sessions import SessionRegistry, kitty_available, send_message_to_session
+from src.sessions import (SessionRegistry, kitty_available, send_message_to_session,
+                          list_injectable_windows)
 from src.ui import FOCUS_QUEUE, FOCUS_SESSIONS, Renderer, UIState, term
 
 
@@ -42,8 +43,11 @@ async def run() -> None:
     state    = UIState(queue=queue, registry=registry)
     renderer = Renderer(state)
 
-    # check Kitty remote control once at startup
-    state.kitty_ok = await loop.run_in_executor(None, kitty_available)
+    state.kitty_ok    = await loop.run_in_executor(None, kitty_available)
+    state.linking      = False
+    state.link_wins    = []
+    state.link_cursor  = 0
+    state.link_session = ""
 
     # ── socket server ─────────────────────────────────────────────────────────
 
@@ -115,6 +119,34 @@ async def run() -> None:
                 state.tick += 1
                 if state.tick % 8 == 0:
                     state.dirty = True   # drive animations + age updates
+
+                # ── link picker mode ──────────────────────────────────────────
+                if state.linking:
+                    if k:
+                        ks = str(k)
+                        if k.name == "KEY_ESCAPE":
+                            state.linking = False
+                            state.dirty   = True
+                        elif key.name in ("KEY_UP",) or ks == "k":
+                            if state.link_cursor > 0:
+                                state.link_cursor -= 1
+                                state.dirty = True
+                        elif k.name in ("KEY_DOWN",) or ks == "j":
+                            if state.link_cursor < len(state.link_wins) - 1:
+                                state.link_cursor += 1
+                                state.dirty = True
+                        elif k.name in ("KEY_ENTER", "\n", "\r") or ks in ("\n", "\r"):
+                            if state.link_wins:
+                                wid, _ = state.link_wins[state.link_cursor]
+                                registry.pin_window(state.link_session, wid)
+                            state.linking = False
+                            state.dirty   = True
+                    if state.dirty or (now - last_draw) > 0.1:
+                        renderer.draw()
+                        renderer.draw_link_picker(state)
+                        last_draw   = now
+                        state.dirty = False
+                    continue
 
                 # ── composer mode ─────────────────────────────────────────────
                 if state.composing:
@@ -192,8 +224,20 @@ async def run() -> None:
                 elif ks in ("d", "D"):
                     await resolve("deny")
 
+                elif ks in ("l", "L"):
+                    # Link selected session to an X11 window
+                    sessions = registry.active()
+                    if sessions:
+                        s = sessions[min(state.s_cursor, len(sessions)-1)]
+                        wins = list_injectable_windows(s.terminal_pid or 11297)
+                        if wins:
+                            state.linking      = True
+                            state.link_wins    = wins
+                            state.link_cursor  = 0
+                            state.link_session = s.session_id
+                            state.dirty        = True
+
                 elif ks in ("m", "M"):
-                    # open composer targeting currently selected session
                     sessions = registry.active()
                     if sessions or queue.pending:
                         state.composing   = True

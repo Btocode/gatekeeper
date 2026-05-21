@@ -18,12 +18,35 @@ from dataclasses import dataclass, field
 
 # ── session ───────────────────────────────────────────────────────────────────
 
+WINDOW_MAP_FILE = os.path.expanduser("~/.claude/perm-window-map.json")
+
+
+def load_window_map() -> dict[str, int]:
+    """Load persisted session_id → window_id mappings."""
+    try:
+        import json
+        with open(WINDOW_MAP_FILE) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def save_window_map(m: dict[str, int]) -> None:
+    import json
+    try:
+        with open(WINDOW_MAP_FILE, "w") as f:
+            json.dump(m, f, indent=2)
+    except Exception:
+        pass
+
+
 @dataclass
 class Session:
     session_id:   str
     cwd:          str
     tty_path:     str = ""
     terminal_pid: int = 0
+    pinned_window: int = 0    # explicitly linked X11 window_id (0 = none)
     first_seen:   float = field(default_factory=time.time)
     last_seen:    float = field(default_factory=time.time)
     tool_count:   int   = 0
@@ -46,12 +69,25 @@ class SessionRegistry:
     def __init__(self) -> None:
         self._map: dict[str, Session] = {}
 
+    def __init__(self) -> None:
+        self._map: dict[str, Session] = {}
+        self._window_map: dict[str, int] = load_window_map()
+
+    def pin_window(self, session_id: str, window_id: int) -> None:
+        """Explicitly link a session to an X11 window and persist it."""
+        if session_id in self._map:
+            self._map[session_id].pinned_window = window_id
+        self._window_map[session_id] = window_id
+        save_window_map(self._window_map)
+
     def touch(self, session_id: str, cwd: str,
               tty_path: str = "", terminal_pid: int = 0) -> Session:
         if session_id not in self._map:
+            pinned = self._window_map.get(session_id, 0)
             self._map[session_id] = Session(
                 session_id=session_id, cwd=cwd,
                 tty_path=tty_path, terminal_pid=terminal_pid,
+                pinned_window=pinned,
             )
         s = self._map[session_id]
         s.last_seen   = time.time()
@@ -218,6 +254,14 @@ def _x11_inject(window_id: int, text: str) -> bool:
 
 # ── send message ──────────────────────────────────────────────────────────────
 
+def list_injectable_windows(terminal_pid: int) -> list[tuple[int, str]]:
+    """Return all non-daemon windows for the terminal emulator, for user to pick from."""
+    windows = _x11_windows_for_pid(terminal_pid)
+    return [(wid, title) for wid, title in windows
+            if "claude-perm" not in title.lower()
+            and "perm-manager" not in title.lower()]
+
+
 def send_message_to_session(session: Session, text: str) -> tuple[bool, str]:
     """
     Find the terminal window for this session and inject `text` as keystrokes.
@@ -227,6 +271,12 @@ def send_message_to_session(session: Session, text: str) -> tuple[bool, str]:
       3. Exclude the daemon's own window (title contains 'claude-perm')
       4. Fall back to first eligible window
     """
+    # Use pinned window if set
+    if session.pinned_window:
+        ok = _x11_inject(session.pinned_window, text + "\n")
+        return (True, f"x11:pinned/{session.pinned_window}") if ok \
+               else (False, f"x11 inject failed on pinned/{session.pinned_window}")
+
     term_pid = session.terminal_pid
     if not term_pid and session.tty_path:
         term_pid = find_terminal_pid_from_tty(session.tty_path)

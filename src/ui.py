@@ -260,7 +260,8 @@ class Renderer:
                 bg  = BG3 if sel else BG
                 arr = f"{BLUE}>{term.normal}" if sel else " "
                 if sub == 0:
-                    line = f"{arr} {CYAN}{term.bold}{s.short_id()}{term.normal}  {DIM}{s.age_str()}{term.normal}"
+                    pin = f" {GREEN}[linked]{term.normal}" if s.pinned_window else ""
+                    line = f"{arr} {CYAN}{term.bold}{s.short_id()}{term.normal}{pin}  {DIM}{s.age_str()}{term.normal}"
                 elif sub == 1:
                     line = f"  {DIM}{_clamp(s.short_cwd(), inner - 2)}{term.normal}"
                 else:
@@ -420,10 +421,44 @@ class Renderer:
 
     def _footer(self, E, h, w, st):
         keys = (f"  {BLUE}Tab{term.normal} pane"
-                f"  {DIM}jk/arrow{term.normal} nav"
+                f"  {DIM}jk{term.normal} nav"
                 f"  {GREEN}A{term.normal} allow"
                 f"  {RED}D{term.normal} deny"
                 f"  {CYAN}M{term.normal} message"
+                f"  {YELLOW}L{term.normal} link window"
                 f"  {DIM}Q{term.normal} quit")
         E(term.move(h-2, 0) + BG2 + _pad(keys, w) + term.normal)
         E(term.move(h-1, 0) + BG2 + " " * w + term.normal)
+
+    def draw_link_picker(self, state) -> None:
+        """Overlay: pick which X11 window to pin to the selected session."""
+        h, w  = term.height, term.width
+        wins  = state.link_wins
+        bw    = min(w - 6, 70)
+        col   = (w - bw - 4) // 2
+        row   = h - 4 - len(wins) - 4
+
+        out: list[str] = []
+        E = out.append
+
+        E(term.move(row,   col) + BG2 + DIM + "+" + "-" * bw + "+" + term.normal)
+        E(term.move(row+1, col) + BG2 + YELLOW + term.bold
+          + _pad(f"|  Link session {state.link_session[:8]} to a window:", bw+1) + "|"
+          + term.normal)
+        E(term.move(row+2, col) + BG2 + DIM + "+" + "-" * bw + "+" + term.normal)
+
+        for i, (wid, title) in enumerate(wins):
+            sel  = i == state.link_cursor
+            bg   = BG3 if sel else BG2
+            arr  = f"{YELLOW}>{term.normal}" if sel else " "
+            line = f"|  {arr} {_clamp(title or 'Terminal', bw-6)}  [win/{wid}]"
+            E(term.move(row+3+i, col) + bg + _pad(line, bw+1) + DIM + "|" + term.normal)
+
+        last = row + 3 + len(wins)
+        E(term.move(last,   col) + BG2 + DIM + "+" + "-" * bw + "+" + term.normal)
+        E(term.move(last+1, col) + BG2 + DIM
+          + _pad("|  Enter=select  Esc=cancel", bw+1) + "|" + term.normal)
+        E(term.move(last+2, col) + BG2 + DIM + "+" + "-" * bw + "+" + term.normal)
+
+        sys.stdout.write("".join(out))
+        sys.stdout.flush()
