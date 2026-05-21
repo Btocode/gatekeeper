@@ -10,6 +10,7 @@ import os
 import re
 import sys
 import time
+import unicodedata
 from dataclasses import dataclass, field
 
 import blessed
@@ -21,55 +22,75 @@ from src.sessions import Session, SessionRegistry
 term = blessed.Terminal()
 
 # ── palette (GitHub dark) ─────────────────────────────────────────────────────
-BG       = term.on_color_rgb(13,  17,  23)
-BG2      = term.on_color_rgb(22,  27,  34)
-BG3      = term.on_color_rgb(33,  38,  45)
-BG4      = term.on_color_rgb(48,  54,  61)
-FG       = term.color_rgb(230, 237, 243)
-DIM      = term.color_rgb(110, 118, 129)
-BLUE     = term.color_rgb(88,  166, 255)
-GREEN    = term.color_rgb(63,  185, 80)
-RED      = term.color_rgb(248, 81,  73)
-YELLOW   = term.color_rgb(210, 153, 34)
-CYAN     = term.color_rgb(57,  197, 187)
-MAGENTA  = term.color_rgb(188, 140, 255)
-ORANGE   = term.color_rgb(255, 160, 72)
+BG      = term.on_color_rgb(13,  17,  23)
+BG2     = term.on_color_rgb(22,  27,  34)
+BG3     = term.on_color_rgb(33,  38,  45)
+FG      = term.color_rgb(230, 237, 243)
+DIM     = term.color_rgb(110, 118, 129)
+BLUE    = term.color_rgb(88,  166, 255)
+GREEN   = term.color_rgb(63,  185, 80)
+RED     = term.color_rgb(248, 81,  73)
+YELLOW  = term.color_rgb(210, 153, 34)
+CYAN    = term.color_rgb(57,  197, 187)
+MAGENTA = term.color_rgb(188, 140, 255)
+ORANGE  = term.color_rgb(255, 160, 72)
 
+# Use only safe single-width ASCII/Latin icons
 TOOL_COLOR = {
     "Bash": YELLOW, "Edit": CYAN, "Write": RED,
     "Read": GREEN, "WebSearch": MAGENTA, "WebFetch": MAGENTA,
     "Agent": BLUE, "NotebookEdit": ORANGE,
 }
 TOOL_ICON = {
-    "Bash": "❯", "Edit": "✎", "Write": "✦", "Read": "◎",
-    "WebSearch": "⌕", "WebFetch": "⌕", "Agent": "⬡", "NotebookEdit": "⊞",
+    "Bash": "$", "Edit": "~", "Write": "+", "Read": "o",
+    "WebSearch": "?", "WebFetch": "?", "Agent": "*", "NotebookEdit": "#",
 }
 
-SPINNER = ["⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"]
-PULSE   = ["▪","▫","▪","▫"]
-WAVE    = ["▁","▂","▃","▄","▅","▆","▇","█","▇","▆","▅","▄","▃","▂","▁"]
+SPINNER = ["|", "/", "-", "\\"]   # ASCII spinner, always 1 col
 
 
-# ── helpers ───────────────────────────────────────────────────────────────────
+# ── width helpers ─────────────────────────────────────────────────────────────
+
+def _cw(c: str) -> int:
+    """Display column width of a single character."""
+    eaw = unicodedata.east_asian_width(c)
+    return 2 if eaw in ("W", "F") else 1
+
 
 def _vis(s: str) -> int:
-    return len(re.sub(r'\x1b\[[0-9;]*m', '', s))
+    """Visible display width of a string (strips ANSI, counts column widths)."""
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", s)
+    return sum(_cw(c) for c in plain)
+
 
 def _clamp(s: str, n: int) -> str:
-    return s[:n] if len(s) > n else s
+    """Clamp plain string to n display columns (no ANSI)."""
+    w, out = 0, []
+    for c in s:
+        cw = _cw(c)
+        if w + cw > n:
+            break
+        out.append(c)
+        w += cw
+    return "".join(out)
+
 
 def _pad(s: str, n: int) -> str:
+    """Pad string (may contain ANSI) to exactly n display columns."""
     return s + " " * max(0, n - _vis(s))
+
 
 def _tool(name: str) -> str:
     c = TOOL_COLOR.get(name, FG)
-    i = TOOL_ICON.get(name, "·")
+    i = TOOL_ICON.get(name, ".")
     return f"{c}{term.bold}{i} {name}{term.normal}"
+
 
 def _age_color(secs: float) -> str:
     if secs < 10:  return GREEN
     if secs < 30:  return YELLOW
     return RED
+
 
 def _age_str(secs: float) -> str:
     s   = int(secs)
@@ -77,11 +98,14 @@ def _age_str(secs: float) -> str:
     txt = f"{s}s" if s < 60 else f"{s//60}m{s%60:02d}s"
     return f"{col}{txt}{term.normal}"
 
+
 def _age_bar(secs: float, w: int = 12) -> str:
     ratio  = min(secs / 60.0, 1.0)
     filled = int(ratio * w)
     col    = _age_color(secs)
-    return f"{col}{'█' * filled}{'░' * (w - filled)} {int(ratio*100):3d}%{term.normal}"
+    bar    = "#" * filled + "-" * (w - filled)
+    return f"{col}[{bar}] {int(ratio*100):3d}%{term.normal}"
+
 
 def _uptime(secs: int) -> str:
     h, r = divmod(secs, 3600)
@@ -89,7 +113,7 @@ def _uptime(secs: int) -> str:
     return f"{h:02d}:{m:02d}:{s:02d}"
 
 
-# ── focus enum ────────────────────────────────────────────────────────────────
+# ── focus ─────────────────────────────────────────────────────────────────────
 
 FOCUS_SESSIONS = 0
 FOCUS_QUEUE    = 1
@@ -103,30 +127,23 @@ class UIState:
     registry: SessionRegistry
     history:  list[HistoryEntry] = field(default_factory=list)
 
-    # cursors
-    focus:       int = FOCUS_QUEUE   # which pane has keyboard focus
-    q_cursor:    int = 0             # cursor in pending queue
-    s_cursor:    int = 0             # cursor in sessions list
+    focus:       int  = FOCUS_QUEUE
+    q_cursor:    int  = 0
+    s_cursor:    int  = 0
 
-    # message composer
     composing:   bool = False
     message_buf: str  = ""
 
-    # counters / animation
     tick:    int   = 0
     allowed: int   = 0
     denied:  int   = 0
     start:   float = field(default_factory=time.time)
     dirty:   bool  = True
-    kitty_ok: bool = False           # set by daemon after checking
+    kitty_ok: bool = False
 
     @property
     def spinner(self) -> str:
         return SPINNER[self.tick % len(SPINNER)]
-
-    @property
-    def wave(self) -> str:
-        return WAVE[self.tick % len(WAVE)]
 
 
 # ── renderer ──────────────────────────────────────────────────────────────────
@@ -135,133 +152,149 @@ class Renderer:
     def __init__(self, state: UIState) -> None:
         self.state = state
 
-    # ── top-level draw ────────────────────────────────────────────────────────
-
     def draw(self) -> None:
         st = self.state
         h  = term.height
         w  = term.width
 
-        # column widths
-        lw = max(26, min(30, w // 5))      # sessions pane
-        mw = max(28, min(36, w // 4))      # queue pane
-        rw = w - lw - mw - 2              # detail pane (2 dividers)
+        # Column widths — all pure ints, no ANSI involved in arithmetic
+        lw = max(24, min(28, w // 5))
+        mw = max(26, min(34, w // 4))
+        rw = w - lw - mw - 2    # 2 divider chars
 
         out: list[str] = []
         E = out.append
 
         E(term.home + BG + term.clear)
 
-        self._draw_banner(E, h, w, st)
-        self._draw_columns(E, h, w, lw, mw, rw, st)
-        self._draw_footer(E, h, w, st)
+        self._banner(E, w, st)
+        self._columns(E, h, w, lw, mw, rw, st)
+        self._footer(E, h, w, st)
 
         if st.composing:
-            self._draw_composer(E, h, w, st)
+            self._composer(E, h, w, st)
 
         sys.stdout.write("".join(out))
         sys.stdout.flush()
 
     # ── banner ────────────────────────────────────────────────────────────────
 
-    def _draw_banner(self, E, h, w, st):
+    def _banner(self, E, w, st):
         n    = len(st.queue.pending)
-        spin = f"{BLUE}{st.spinner}{term.normal}" if n else f"{GREEN}●{term.normal}"
+        spin = st.spinner if n else "*"
         up   = _uptime(int(time.time() - st.start))
 
-        E(term.move(0) + BG2 + DIM + "┏" + "━"*(w-2) + "┛" + term.normal)
+        # Row 0: top border
+        E(term.move(0, 0) + BG2 + DIM + "+" + "-" * (w - 2) + "+" + term.normal)
 
-        title = f"  ⬡  CLAUDE PERMISSION MANAGER"
-        stats = (f"  {spin}  {BLUE}{term.bold}{n}{term.normal} pending"
-                 f"  {DIM}·{term.normal}  {GREEN}✓ {st.allowed}{term.normal}"
-                 f"  {RED}✗ {st.denied}{term.normal}"
-                 f"  {DIM}· {up}{term.normal}  ")
+        # Row 1: title + stats
+        title = " [CLAUDE PERMISSION MANAGER]"
+        stats = (f" {BLUE if n else GREEN}{spin}{term.normal}"
+                 f"  {BLUE}{term.bold}{n}{term.normal} pending"
+                 f"  {DIM}|{term.normal}"
+                 f"  {GREEN}A:{st.allowed}{term.normal}"
+                 f"  {RED}D:{st.denied}{term.normal}"
+                 f"  {DIM}{up}{term.normal} ")
+        gap = max(0, w - len(title) - _vis(stats))
+        E(term.move(1, 0) + BG2
+          + BLUE + term.bold + title + term.normal
+          + " " * gap + stats)
 
-        gap = max(0, w - len(title) - _vis(stats) - 2)
-        E(term.move(1) + BG2 + BLUE + term.bold + title + term.normal + " "*gap + stats)
-        E(term.move(2) + BG2 + DIM + "┗" + "━"*(w-2) + "┛" + term.normal)
+        # Row 2: bottom border
+        E(term.move(2, 0) + BG2 + DIM + "+" + "-" * (w - 2) + "+" + term.normal)
 
-    # ── three-column layout ───────────────────────────────────────────────────
+    # ── column layout ─────────────────────────────────────────────────────────
 
-    def _draw_columns(self, E, h, w, lw, mw, rw, st):
-        content_h = h - 5   # banner(3) + footer(2)
-
-        # header row
-        lf = f"{BLUE}{term.bold}" if st.focus == FOCUS_SESSIONS else DIM
-        mf = f"{BLUE}{term.bold}" if st.focus == FOCUS_QUEUE    else DIM
-        rf = DIM
-
+    def _columns(self, E, h, w, lw, mw, rw, st):
         sessions = st.registry.active()
-        sq_label = f"SESSIONS ({len(sessions)})"
-        qq_label = f"QUEUE ({len(st.queue.pending)})"
 
-        E(term.move(3) + BG2
-          + lf + f" {sq_label:<{lw-2}}" + term.normal
-          + DIM + "│" + term.normal
-          + mf + f" {qq_label:<{mw-2}}" + term.normal
-          + DIM + "│" + term.normal
-          + rf + f" DETAIL" + term.normal)
-        E(term.move(4) + DIM + "─"*lw + "┼" + "─"*mw + "┼" + "─"*rw + term.normal)
+        # Header row (row 3)
+        lf = BLUE + term.bold if st.focus == FOCUS_SESSIONS else DIM
+        mf = BLUE + term.bold if st.focus == FOCUS_QUEUE    else DIM
 
-        # content rows
-        for row in range(5, h - 2):
-            ri = row - 5
-            lc = self._session_cell(ri, lw, content_h, st, sessions)
-            mc = self._queue_cell(ri, mw, content_h, st)
-            rc = self._detail_cell(ri, rw, content_h, st)
-            E(term.move(row)
-              + lc + DIM + "│" + term.normal
-              + mc + DIM + "│" + term.normal
+        lh = _pad(f" SESSIONS({len(sessions)})", lw)
+        mh = _pad(f" QUEUE({len(st.queue.pending)})", mw)
+        rh = _pad(f" DETAIL", rw)
+
+        E(term.move(3, 0) + BG2
+          + lf + lh + term.normal
+          + DIM + "|" + term.normal
+          + mf + mh + term.normal
+          + DIM + "|" + term.normal
+          + DIM + rh + term.normal)
+
+        # Separator (row 4)
+        E(term.move(4, 0) + DIM
+          + "-" * lw + "+" + "-" * mw + "+" + "-" * rw
+          + term.normal)
+
+        # Content rows
+        content_h = h - 7   # banner(3) + header(1) + sep(1) + footer(2)
+        for ri in range(content_h):
+            row = 5 + ri
+            lc  = self._left_cell(ri, lw, content_h, st, sessions)
+            mc  = self._mid_cell(ri, mw, content_h, st)
+            rc  = self._right_cell(ri, rw, content_h, st)
+            E(term.move(row, 0)
+              + lc
+              + DIM + "|" + term.normal
+              + mc
+              + DIM + "|" + term.normal
               + rc)
 
-    def _session_cell(self, ri, w, total_h, st, sessions) -> str:
-        # split left pane: sessions top, history bottom
-        hist_h    = min(6, len(st.history) + 2)
-        sess_h    = total_h - hist_h - 1   # -1 for divider
-        inner     = w - 2
+    # ── left cell (sessions + history) ────────────────────────────────────────
+
+    def _left_cell(self, ri, w, total_h, st, sessions) -> str:
+        HIST_FIXED = min(8, total_h // 3)
+        sess_h     = total_h - HIST_FIXED - 1   # -1 for divider row
+
+        inner = w - 2
 
         if ri < sess_h:
-            # sessions area
+            # Sessions — 3 rows per session
             idx = ri // 3
             sub = ri % 3
             if idx < len(sessions):
                 s   = sessions[idx]
                 sel = (idx == st.s_cursor and st.focus == FOCUS_SESSIONS)
                 bg  = BG3 if sel else BG
-                arr = f"{BLUE}▶{term.normal}" if sel else " "
+                arr = f"{BLUE}>{term.normal}" if sel else " "
                 if sub == 0:
-                    txt = f"{arr} {CYAN}{term.bold}{s.short_id()}{term.normal}  {DIM}{s.age_str()}{term.normal}"
+                    line = f"{arr} {CYAN}{term.bold}{s.short_id()}{term.normal}  {DIM}{s.age_str()}{term.normal}"
                 elif sub == 1:
-                    txt = f"  {DIM}{s.short_cwd()}{term.normal}"
+                    line = f"  {DIM}{_clamp(s.short_cwd(), inner - 2)}{term.normal}"
                 else:
-                    txt = f"  {DIM}{s.tool_count} tool calls{term.normal}"
-                return bg + _pad(txt, w) + term.normal
-            return BG + " "*w + term.normal
+                    line = f"  {DIM}{s.tty_label()}  {s.tool_count} calls{term.normal}"
+                return bg + _pad(line, w) + term.normal
+            return BG + " " * w + term.normal
 
         if ri == sess_h:
-            return BG2 + DIM + "─"*w + term.normal
+            return BG2 + DIM + "-" * w + term.normal
 
-        # history area
+        # History
         hi = ri - sess_h - 1
         if hi == 0:
-            label = f"HISTORY ({len(st.history)})"
-            return BG2 + DIM + f" {label:<{inner}}" + term.normal + " "
-        elif hi - 1 < len(st.history):
-            e    = list(reversed(st.history))[hi - 1]
-            icon = f"{GREEN}✓{term.normal}" if e.decision == "allow" else f"{RED}✗{term.normal}"
-            line = f" {icon} {_tool(e.tool_name)} {DIM}{_clamp(e.command_summary, inner-10)}{term.normal}"
+            return BG2 + _pad(f" HISTORY({len(st.history)})", w) + term.normal
+        hidx = hi - 1
+        if hidx < len(st.history):
+            e    = list(reversed(st.history))[hidx]
+            icon = f"{GREEN}A{term.normal}" if e.decision == "allow" else f"{RED}D{term.normal}"
+            line = f" {icon} {_tool(e.tool_name)} {DIM}{_clamp(e.command_summary, inner - 8)}{term.normal}"
             return BG + _pad(line, w) + term.normal
-        return BG + " "*w + term.normal
 
-    def _queue_cell(self, ri, w, total_h, st) -> str:
+        return BG + " " * w + term.normal
+
+    # ── middle cell (pending queue) ────────────────────────────────────────────
+
+    def _mid_cell(self, ri, w, total_h, st) -> str:
         inner   = w - 2
         pending = st.queue.pending
 
         if not pending:
             if ri == total_h // 2:
-                msg = f"{DIM}{st.spinner} waiting{term.normal}"
-                return BG + _pad(f"  {msg}", w) + term.normal
-            return BG + " "*w + term.normal
+                msg = f" {st.spinner} waiting..."
+                return BG + _pad(f"{DIM}{msg}{term.normal}", w) + term.normal
+            return BG + " " * w + term.normal
 
         idx = ri // 3
         sub = ri % 3
@@ -271,136 +304,122 @@ class Renderer:
             age  = time.time() - r.timestamp
             sel  = (idx == st.q_cursor and st.focus == FOCUS_QUEUE)
             bg   = BG3 if sel else BG
-            arr  = f"{BLUE}▶{term.normal}" if sel else " "
+            arr  = f"{BLUE}>{term.normal}" if sel else " "
             if sub == 0:
                 line = f"{arr} {_tool(r.tool_name)}  {_age_str(age)}"
             elif sub == 1:
-                line = f"  {DIM}{_clamp(r.summary_command(), inner-2)}{term.normal}"
+                line = f"  {DIM}{_clamp(r.summary_command(), inner - 2)}{term.normal}"
             else:
-                line = f"  {DIM}{r.short_session()[:6]}  {r.cwd.replace(os.path.expanduser('~'),'~')[-16:]}{term.normal}"
+                line = f"  {DIM}{r.short_session()}  {_clamp(r.cwd.replace(os.path.expanduser('~'), '~'), inner - 10)}{term.normal}"
             return bg + _pad(line, w) + term.normal
 
-        return BG + " "*w + term.normal
+        return BG + " " * w + term.normal
 
-    def _detail_cell(self, ri, w, total_h, st) -> str:
+    # ── right cell (detail) ───────────────────────────────────────────────────
+
+    def _right_cell(self, ri, w, total_h, st) -> str:
         inner   = w - 2
         pending = st.queue.pending
 
         if not pending:
-            lines = self._idle_detail(inner, st)
-            return BG + _pad(lines[ri] if ri < len(lines) else "", w) + term.normal
+            lines = self._idle_lines(inner, st)
+            line  = lines[ri] if ri < len(lines) else ""
+            return BG + _pad(line, w) + term.normal
 
-        item  = pending[min(st.q_cursor, len(pending)-1)]
-        r     = item.request
-        age   = time.time() - r.timestamp
-        cwd   = r.cwd.replace(os.path.expanduser("~"), "~")
+        item = pending[min(st.q_cursor, len(pending) - 1)]
+        dl   = self._detail_lines(item.request, inner, st)
+        line = dl[ri] if ri < len(dl) else ""
+        return BG + _pad(line, w) + term.normal
 
-        # build all detail lines once
-        dl = self._build_detail_lines(r, age, cwd, inner, st)
-        if ri < len(dl):
-            return BG + _pad(dl[ri], w) + term.normal
-        return BG + " "*w + term.normal
+    def _detail_lines(self, r, inner, st) -> list[str]:
+        age  = time.time() - r.timestamp
+        cwd  = r.cwd.replace(os.path.expanduser("~"), "~")
 
-    def _build_detail_lines(self, r, age, cwd, inner, st) -> list[str]:
-        dl: list[str] = [""]
-
-        # session badge
-        badge = f"{term.on_color_rgb(12,31,56)}{BLUE}{term.bold}  {r.short_session()[:8]}  {term.normal}"
-        dl.append(f" {badge}  {_tool(r.tool_name)}")
-        dl.append("")
-
-        # meta
-        def row(label, val):
-            return f"  {DIM}{label:<9}{term.normal}{val}"
-
-        dl.append(row("CWD",     f"{DIM}{_clamp(cwd, inner-12)}{term.normal}"))
-        dl.append(row("Waiting", _age_str(age)))
-        dl.append(row("",        _age_bar(age, min(inner-16, 16))))
-        dl.append("")
-
-        # command box
         try:
             cmd_lines = json.dumps(r.tool_input, indent=2).splitlines()
         except Exception:
             cmd_lines = [str(r.tool_input)]
-        bw = min(inner - 4, max(max(len(l) for l in cmd_lines) if cmd_lines else 10, 18))
-        dl.append(f"  {DIM}╭{'─'*bw}╮{term.normal}")
-        for cl in cmd_lines[:6]:
-            dl.append(f"  {DIM}│{term.normal} {FG}{_pad(_clamp(cl, bw-2), bw-2)}{term.normal}{DIM}│{term.normal}")
-        if len(cmd_lines) > 6:
-            dl.append(f"  {DIM}│{term.normal} {DIM}{_clamp(f'… {len(cmd_lines)-6} more lines', bw-2):<{bw-2}}{term.normal}{DIM}│{term.normal}")
-        dl.append(f"  {DIM}╰{'─'*bw}╯{term.normal}")
+
+        dl: list[str] = [""]
+        dl.append(f" {BLUE}{term.bold}Session{term.normal}  {CYAN}{r.short_session()[:8]}{term.normal}")
+        dl.append(f" {DIM}Tool   {term.normal}  {_tool(r.tool_name)}")
+        dl.append(f" {DIM}CWD    {term.normal}  {DIM}{_clamp(cwd, inner - 10)}{term.normal}")
+        dl.append(f" {DIM}Age    {term.normal}  {_age_str(age)}")
+        dl.append(f" {DIM}       {term.normal}  {_age_bar(age, min(inner - 18, 14))}")
         dl.append("")
 
-        # action row
-        ab = f"{term.on_color_rgb(15,44,28)}{GREEN}{term.bold} ✓ ALLOW [A] {term.normal}"
-        db = f"{term.on_color_rgb(56,18,22)}{RED}{term.bold}  ✗ DENY [D] {term.normal}"
+        # Command box
+        bw = min(inner - 4, 48)
+        dl.append(f"  {DIM}+{'-' * bw}+{term.normal}")
+        for cl in cmd_lines[:7]:
+            dl.append(f"  {DIM}|{term.normal} {FG}{_pad(_clamp(cl, bw - 2), bw - 2)}{term.normal}{DIM}|{term.normal}")
+        if len(cmd_lines) > 7:
+            dl.append(f"  {DIM}| {_clamp(f'... {len(cmd_lines)-7} more lines', bw-2):<{bw-2}} |{term.normal}")
+        dl.append(f"  {DIM}+{'-' * bw}+{term.normal}")
+        dl.append("")
+
+        # Action row
+        ab = f"{term.on_color_rgb(15,44,28)}{GREEN}{term.bold} A:ALLOW {term.normal}"
+        db = f"{term.on_color_rgb(56,18,22)}{RED}{term.bold}  D:DENY  {term.normal}"
         dl.append(f"  {ab}   {db}")
         dl.append("")
 
-        # message hint
         if st.kitty_ok:
-            dl.append(f"  {DIM}M  →  send message to this session{term.normal}")
+            dl.append(f"  {DIM}M -> send message to session{term.normal}")
         else:
-            dl.append(f"  {DIM}Kitty remote control unavailable{term.normal}")
-            dl.append(f"  {DIM}(enable allow_remote_control in kitty.conf){term.normal}")
+            dl.append(f"  {DIM}M -> send via PTY{term.normal}")
 
         return dl
 
-    def _idle_detail(self, inner, st) -> list[str]:
-        lines = [
+    def _idle_lines(self, inner, st) -> list[str]:
+        return [
             "",
-            f"  {BLUE}{term.bold}⬡  Permission Manager Active{term.normal}",
+            f" {BLUE}{term.bold}[CLAUDE PERMISSION MANAGER]{term.normal}",
             "",
-            f"  {DIM}Listening on{term.normal}",
-            f"  {CYAN}/tmp/claude-perm-{os.environ.get('USER','user')}.sock{term.normal}",
+            f" {DIM}Listening on:{term.normal}",
+            f" {CYAN}/tmp/claude-perm-{os.environ.get('USER','user')}.sock{term.normal}",
             "",
-            f"  {DIM}Bash · Edit · Write · Agent calls{term.normal}",
-            f"  {DIM}will appear here for approval.{term.normal}",
+            f" {DIM}Bash / Edit / Agent calls appear here.{term.normal}",
             "",
-            f"  {GREEN}{st.spinner}  Listening…{term.normal}",
+            f" {DIM}{st.spinner} waiting for requests...{term.normal}",
         ]
-        return lines
 
     # ── composer overlay ──────────────────────────────────────────────────────
 
-    def _draw_composer(self, E, h, w, st):
-        bw  = min(w - 8, 70)
-        col = (w - bw - 4) // 2
-        row = h - 10
+    def _composer(self, E, h, w, st):
+        sessions = st.registry.active()
+        sid      = sessions[min(st.s_cursor, len(sessions)-1)].short_id() if sessions else "?"
+        bw       = min(w - 6, 68)
+        col      = (w - bw - 4) // 2
+        row      = h - 9
 
-        sessions  = st.registry.active()
-        sel_sess  = sessions[st.s_cursor].short_id() if sessions else "—"
-
-        E(term.move(row,   col) + BG2 + DIM + "╭" + "─"*(bw) + "╮" + term.normal)
+        E(term.move(row,   col) + BG2 + DIM + "+" + "-" * bw + "+" + term.normal)
         E(term.move(row+1, col) + BG2 + BLUE + term.bold
-          + f"│  ✉  Send message → session {sel_sess}" + " "*(bw - 31 - len(sel_sess)) + "│"
+          + _pad(f"|  Message -> session {sid}", bw + 1) + "|"
           + term.normal)
-        E(term.move(row+2, col) + BG2 + DIM + "├" + "─"*(bw) + "┤" + term.normal)
+        E(term.move(row+2, col) + BG2 + DIM + "+" + "-" * bw + "+" + term.normal)
 
-        buf_display = _clamp(st.message_buf, bw - 4)
-        cursor_col  = col + 3 + len(buf_display)
+        buf_vis = _clamp(st.message_buf, bw - 4)
         E(term.move(row+3, col) + BG3
-          + "│  " + FG + buf_display + " "*(bw - 2 - len(buf_display)) + DIM + "│"
+          + "| " + FG + _pad(buf_vis, bw - 2) + DIM + " |"
           + term.normal)
 
-        E(term.move(row+4, col) + BG2 + DIM + "├" + "─"*(bw) + "┤" + term.normal)
-        hint = f"  Enter send  ·  Esc cancel  ·  Backspace delete"
-        E(term.move(row+5, col) + BG2 + DIM + "│" + _pad(hint, bw) + "│" + term.normal)
-        E(term.move(row+6, col) + BG2 + DIM + "╰" + "─"*(bw) + "╯" + term.normal)
+        E(term.move(row+4, col) + BG2 + DIM + "+" + "-" * bw + "+" + term.normal)
+        hint = "  Enter=send  Esc=cancel  Backspace=delete"
+        E(term.move(row+5, col) + BG2 + DIM + _pad("|" + hint, bw + 1) + "|" + term.normal)
+        E(term.move(row+6, col) + BG2 + DIM + "+" + "-" * bw + "+" + term.normal)
 
-        # position cursor in input line
-        E(term.move(row+3, cursor_col) + term.normal)
+        # Place cursor inside input
+        E(term.move(row + 3, col + 2 + len(buf_vis)))
 
     # ── footer ────────────────────────────────────────────────────────────────
 
-    def _draw_footer(self, E, h, w, st):
-        lf = f"{BLUE}Tab{term.normal}"
-        keys = (f"  {lf} switch pane"
-                f"  {DIM}↑↓ / jk{term.normal} navigate"
+    def _footer(self, E, h, w, st):
+        keys = (f"  {BLUE}Tab{term.normal} pane"
+                f"  {DIM}jk/arrow{term.normal} nav"
                 f"  {GREEN}A{term.normal} allow"
                 f"  {RED}D{term.normal} deny"
                 f"  {CYAN}M{term.normal} message"
                 f"  {DIM}Q{term.normal} quit")
-        E(term.move(h-2) + BG2 + _pad(keys, w) + term.normal)
-        E(term.move(h-1) + BG2 + " "*w + term.normal)
+        E(term.move(h-2, 0) + BG2 + _pad(keys, w) + term.normal)
+        E(term.move(h-1, 0) + BG2 + " " * w + term.normal)
