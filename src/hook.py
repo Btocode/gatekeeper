@@ -68,10 +68,17 @@ def ask_in_terminal(request: Request) -> int | tuple[int, str]:
         return 0  # can't open tty — allow
 
 
+# Tools that are always allowed without asking
+AUTO_ALLOW = {"Read", "TodoRead", "TodoWrite", "NotebookRead"}
+
+
 def main() -> None:
     try:
         hook_input = read_hook_input()
         request    = make_request(hook_input)
+
+        if request.tool_name in AUTO_ALLOW:
+            sys.exit(0)
         try:
             response = send_request(request)
             result   = decide_exit(response)
