@@ -105,8 +105,10 @@ async def run() -> None:
         registry.touch(request.session_id, request.cwd,
                        request.tty_path, request.terminal_pid)
         # Auto-approve if session is flagged — but never for dangerous commands
-        danger, reason = is_dangerous(request.tool_name, request.tool_input)
+        danger, _ = is_dangerous(request.tool_name, request.tool_input)
         if registry.is_auto_approve(request.session_id) and not danger:
+            # Remove from queue immediately (server.py adds before this callback fires)
+            queue.remove(request.id)
             resp = json.dumps({"decision": "allow"}) + "\n"
             if writer and not writer.is_closing():
                 try:
