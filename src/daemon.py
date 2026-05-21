@@ -88,6 +88,9 @@ async def run() -> None:
     state.kitty_ok        = await loop.run_in_executor(None, kitty_available)
     state.linking           = False
     state.link_start_window = 0
+    # Record which window is focused when the daemon starts — this is the
+    # daemon's own terminal. Never link to it.
+    state.daemon_window_id  = await loop.run_in_executor(None, _get_focused_window)
 
     # Pre-populate sessions from running Claude processes
     await loop.run_in_executor(None, discover_running_sessions, registry)
@@ -173,14 +176,16 @@ async def run() -> None:
 
                 # ── focus-to-link mode ────────────────────────────────────────
                 if state.linking:
-                    # Wait until focus moves to a DIFFERENT window than when L was pressed
                     focused = await loop.run_in_executor(None, _get_focused_window)
-                    if focused and focused != state.link_start_window:
-                        # User switched to a non-daemon window — link it
+                    # Accept focus change only if it's a real different window,
+                    # not the daemon's own terminal, and not zero.
+                    is_different  = focused and focused != state.link_start_window
+                    is_own_window = focused == state.daemon_window_id
+                    if is_different and not is_own_window:
                         registry.pin_window(state.link_session, focused)
                         _log({"type": "link", "session": state.link_session,
                               "window": focused})
-                        state.linking = False
+                        state.linking = False   # ← close modal
                         state.dirty   = True
                     if k:
                         ks = str(k)
