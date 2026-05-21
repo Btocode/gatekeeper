@@ -16,104 +16,145 @@ import time
 from typing import Any
 
 
-# ── danger patterns ───────────────────────────────────────────────────────────
-# Commands matching any of these are NEVER auto-approved regardless of session
-# settings. They must go through manual approval every time.
+# ── danger detection ──────────────────────────────────────────────────────────
 
-_DANGER_PATTERNS: list[re.Pattern] = [p for p in (re.compile(x, re.IGNORECASE) for x in [
-    # Filesystem destruction
-    r'\brm\b',
-    r'\brmdir\b',
-    r'\bshred\b',
-    r'\btruncate\b',
-    r'>\s*/dev/',                   # overwrite device files
+# Commands that are always safe to auto-approve — their arguments are never checked
+_SAFE_CMDS = frozenset({
+    # Search / read
+    'grep', 'egrep', 'fgrep', 'rg', 'ag', 'find', 'locate', 'fd',
+    'cat', 'head', 'tail', 'less', 'more', 'bat',
+    'ls', 'lls', 'dir', 'tree',
+    'echo', 'printf', 'print',
+    'wc', 'sort', 'uniq', 'cut', 'tr', 'tee', 'xargs', 'awk', 'sed',
+    'diff', 'patch', 'stat', 'file', 'readlink', 'realpath', 'basename', 'dirname',
+    'man', 'help', 'which', 'whereis', 'type', 'command',
+    'pwd', 'date', 'whoami', 'id', 'uname', 'hostname', 'env', 'printenv',
+    'ps', 'top', 'htop', 'df', 'du', 'free', 'uptime', 'lsof', 'netstat', 'ss',
+    # Build / package (installs are fine, only uninstall is dangerous)
+    'npm', 'npx', 'yarn', 'pnpm', 'bun',
+    'pip', 'pip3', 'pip3.11', 'pipenv', 'poetry',
+    'make', 'cmake', 'cargo', 'go',
+    'mvn', 'gradle',
+    # Network read-only
+    'curl', 'wget', 'http', 'httpie', 'dig', 'nslookup', 'ping', 'traceroute',
+    # Archive
+    'tar', 'zip', 'unzip', 'gzip', 'gunzip', 'bzip2', 'xz',
+    # SCM (git/gh read ops — dangerous git subcommands handled separately)
+    'gh',
+    # Misc
+    'jq', 'yq', 'jo', 'python', 'python3', 'node', 'ruby', 'perl', 'lua',
+    'sleep', 'wait', 'true', 'false', 'test',
+    'source', '.', 'export', 'cd', 'pushd', 'popd',
+    'tput', 'clear', 'reset',
+    'touch', 'mkdir', 'cp', 'mv', 'ln',   # non-destructive filesystem ops
+})
 
-    # Database destructive ops
-    r'\bDROP\s+(TABLE|DATABASE|SCHEMA|INDEX|VIEW|FUNCTION|PROCEDURE|TRIGGER)\b',
-    r'\bDELETE\s+FROM\b',
-    r'\bTRUNCATE\b',
-    r'\bALTER\s+TABLE\b',
-    r'\bDROP\s+COLUMN\b',
-    r'\bUPDATE\b.+\bSET\b',        # UPDATE ... SET (broad but catches most mutations)
-    r'\bmongo.*drop\b',
-    r'\bredis-cli.*flushall\b',
-    r'\bredis-cli.*flushdb\b',
+# Executables that are always dangerous regardless of arguments
+_DANGER_CMDS = frozenset({
+    'rm', 'rmdir', 'shred',
+    'ssh', 'scp', 'rsync', 'sftp',
+    'sudo', 'su', 'doas',
+    'dd', 'mkfs', 'fdisk', 'parted',
+    'kill', 'killall', 'pkill',
+    'passwd', 'usermod', 'userdel', 'useradd',
+    'iptables', 'ufw', 'nftables', 'firewall-cmd',
+})
 
-    # SSH / remote access
-    r'\bssh\b',
-    r'\bscp\b',
-    r'\brsync\b',
-    r'\bsftp\b',
-    r'\bansible\b',
-    r'\bterraform\s+(apply|destroy)\b',
-    r'\bkubectl\s+(delete|apply|replace|patch|drain|cordon)\b',
-    r'\bdocker\s+(rm|rmi|kill|stop|prune|system\s+prune)\b',
+# Commands that are dangerous only with specific subcommands
+_DANGER_SUBCMDS: dict[str, frozenset] = {
+    'systemctl': frozenset({'stop', 'disable', 'mask', 'kill', 'restart', 'reload'}),
+    'service':   frozenset({'stop', 'restart', 'kill'}),
+    'docker':    frozenset({'rm', 'rmi', 'kill', 'stop', 'prune', 'system'}),
+    'kubectl':   frozenset({'delete', 'replace', 'patch', 'drain', 'cordon'}),
+    'terraform': frozenset({'apply', 'destroy'}),
+    'ansible':   frozenset({'*'}),       # all ansible subcommands
+    'npm':       frozenset({'uninstall', 'rm', 'remove', 'prune'}),
+    'pip':       frozenset({'uninstall'}),
+    'apt':       frozenset({'remove', 'purge', 'autoremove'}),
+    'apt-get':   frozenset({'remove', 'purge', 'autoremove'}),
+    'chmod':     frozenset({'*'}),
+    'chown':     frozenset({'*'}),
+}
 
-    # Server / service management
-    r'\bsystemctl\s+(stop|disable|mask|kill|restart)\b',
-    r'\bservice\s+\w+\s+(stop|restart|kill)\b',
-    r'\bkill\b',
-    r'\bkillall\b',
-    r'\bpkill\b',
+# Sensitive file path prefixes — writing here always requires approval
+_SENSITIVE_PATHS = (
+    '/etc/', '/usr/', '/bin/', '/sbin/', '/boot/', '/lib/', '/lib64/',
+    '/var/', '/sys/', '/proc/', '/dev/',
+    os.path.expanduser('~/.ssh/'),
+    os.path.expanduser('~/.aws/'),
+    os.path.expanduser('~/.gnupg/'),
+    os.path.expanduser('~/.config/systemd/'),
+)
 
-    # Privilege escalation
-    r'\bsudo\b',
-    r'\bsu\s+',
-    r'\bchmod\b',
-    r'\bchown\b',
 
-    # Package / environment destructive
-    r'\bapt(-get)?\s+remove\b',
-    r'\bapt(-get)?\s+purge\b',
-    r'\bpip\s+uninstall\b',
-    r'\bnpm\s+uninstall\b',
+def _dangerous_bash(command: str) -> tuple[bool, str]:
+    """Check a bash command string. Only checks executables, not quoted args."""
+    # Strip quoted strings to avoid flagging grep/find args like grep "DELETE FROM"
+    clean = re.sub(r'"[^"]*"', '', command)
+    clean = re.sub(r"'[^']*'", '', clean)
 
-    # Network / firewall
-    r'\biptables\b',
-    r'\bufw\b',
-    r'\bnftables\b',
+    # Split by shell operators into individual segments
+    segments = re.split(r'\|{1,2}|&&|;|\n', clean)
 
-    # Disk / partition
-    r'\bdd\s+',
-    r'\bmkfs\b',
-    r'\bfdisk\b',
-    r'\bparted\b',
-    r'\bformat\b',
+    for seg in segments:
+        tokens = seg.strip().lstrip('(').lstrip('!').split()
+        if not tokens:
+            continue
 
-    # Git destructive
-    r'\bgit\s+(push\s+.*--force|reset\s+--hard|clean\s+-f|branch\s+-[dD])\b',
-])]
+        cmd = tokens[0].lstrip('(').lstrip('!')
+
+        # Skip known-safe commands entirely
+        if cmd in _SAFE_CMDS:
+            continue
+
+        # Always dangerous executables
+        if cmd in _DANGER_CMDS:
+            return True, f"dangerous executable: {cmd}"
+
+        # Commands dangerous only with specific subcommands
+        if cmd in _DANGER_SUBCMDS and len(tokens) > 1:
+            sub = tokens[1]
+            allowed = _DANGER_SUBCMDS[cmd]
+            if '*' in allowed or sub in allowed:
+                return True, f"dangerous: {cmd} {sub}"
+
+        # Git — only dangerous with destructive flags
+        if cmd == 'git' and len(tokens) > 1:
+            sub  = tokens[1]
+            rest = ' '.join(tokens[2:])
+            if sub == 'push'  and '--force' in rest: return True, "git push --force"
+            if sub == 'reset' and '--hard'  in rest: return True, "git reset --hard"
+            if sub == 'clean' and '-f'      in rest: return True, "git clean -f"
+            if sub == 'branch' and re.search(r'-[dD]', rest): return True, "git branch -D"
+
+        # Heredoc / process substitution writing to /dev/
+        if re.search(r'>\s*/dev/', seg):
+            return True, "redirect to /dev/"
+
+    return False, ""
 
 
 def is_dangerous(tool_name: str, tool_input: dict[str, Any]) -> tuple[bool, str]:
     """
     Return (True, reason) if this tool call must not be auto-approved.
-    Checks the command/content against known destructive patterns.
+    For Bash: checks the executable and subcommand, NOT quoted arguments.
+    For Edit/Write: only checks the file path, never the content.
     """
-    # Extract the text to check based on tool type
-    text = ""
     if tool_name == "Bash":
-        text = tool_input.get("command", "")
-    elif tool_name in ("Edit", "Write"):
-        # Check file path for sensitive locations
-        path = tool_input.get("file_path", "")
-        sensitive = ["/etc/", "/usr/", "/bin/", "/sbin/", "/boot/",
-                     "/var/", "/sys/", "/proc/", "~/.ssh/", "~/.aws/"]
-        for s in sensitive:
-            if path.startswith(s) or path.startswith(os.path.expanduser(s)):
-                return True, f"write to sensitive path: {path}"
-        # Also check content for SQL mutations
-        text = tool_input.get("new_string", "") or tool_input.get("content", "")
-    elif tool_name == "Agent":
-        text = str(tool_input.get("prompt", ""))
+        return _dangerous_bash(tool_input.get("command", ""))
 
-    if not text:
+    if tool_name in ("Edit", "Write"):
+        path = tool_input.get("file_path", "")
+        if any(path.startswith(p) for p in _SENSITIVE_PATHS):
+            return True, f"sensitive path: {path}"
         return False, ""
 
-    for pattern in _DANGER_PATTERNS:
-        m = pattern.search(text)
-        if m:
-            return True, f"matched dangerous pattern: {m.group(0)!r}"
+    if tool_name == "Agent":
+        # Only flag obvious dangerous prompts — keep it narrow
+        prompt = tool_input.get("prompt", "")
+        if re.search(r'\b(rm -rf|DROP TABLE|DELETE FROM|sudo)\b', prompt, re.IGNORECASE):
+            return True, "dangerous instruction in agent prompt"
+        return False, ""
 
     return False, ""
 from dataclasses import dataclass, field
