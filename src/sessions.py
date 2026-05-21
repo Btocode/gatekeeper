@@ -384,9 +384,9 @@ def _x11_windows_for_pid(pid: int) -> list[tuple[int, str]]:
 
 def _x11_inject(window_id: int, text: str) -> bool:
     """
-    Inject text into an X11 window using XTEST — indistinguishable from real
-    keyboard input (GTK/VTE won't reject it unlike synthetic send_event).
-    Briefly focuses the target window, types, then restores focus.
+    Inject text + Enter into an X11 window using XTEST.
+    Text and Enter are sent in two separate rounds so the terminal
+    input handler finishes processing the text before Enter arrives.
     """
     try:
         import time as _time
@@ -396,32 +396,29 @@ def _x11_inject(window_id: int, text: str) -> bool:
         d    = display.Display()
         win  = d.create_resource_object("window", window_id)
 
-        # Save current focus
         prev_focus = d.get_input_focus().focus
 
-        # Focus target window
+        # Focus target window and wait for it to settle
         win.set_input_focus(X.RevertToParent, X.CurrentTime)
-        d.flush()
-        _time.sleep(0.05)   # let focus settle
+        d.sync()
+        _time.sleep(0.08)
 
         def _fake(ks: int, shift: bool = False) -> None:
             kc = d.keysym_to_keycode(ks)
             if kc == 0:
                 return
             if shift:
-                xtest.fake_input(d, X.KeyPress,   50)   # Left Shift keycode
+                xtest.fake_input(d, X.KeyPress,   50)
             xtest.fake_input(d, X.KeyPress,   kc)
             xtest.fake_input(d, X.KeyRelease, kc)
             if shift:
                 xtest.fake_input(d, X.KeyRelease, 50)
-            d.flush()
 
+        # Round 1 — inject the text characters (without Enter)
         for ch in text:
-            if ch == "\n":
-                _fake(XK.XK_Return)
-            elif ch == " ":
+            if ch == " ":
                 _fake(XK.XK_space)
-            else:
+            elif ch != "\n":
                 ks    = XK.string_to_keysym(ch)
                 shift = ch.isupper() or ch in '!"#$%&\'()*+:<>?@^_{|}~'
                 if ks == 0:
@@ -429,9 +426,12 @@ def _x11_inject(window_id: int, text: str) -> bool:
                 if ks:
                     _fake(ks, shift)
 
-        # d.sync() waits until the X server has processed ALL events (including
-        # the final Return key) before we restore focus — without this the Enter
-        # can land in the wrong window because focus is restored too soon.
+        # Flush and wait — terminal processes text before Enter arrives
+        d.sync()
+        _time.sleep(0.12)
+
+        # Round 2 — inject Enter separately
+        _fake(XK.XK_Return)
         d.sync()
         _time.sleep(0.05)
 
