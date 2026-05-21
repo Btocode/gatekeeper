@@ -15,6 +15,14 @@ exec python "$SCRIPT_DIR/src/daemon.py" "\$@"
 WRAPPER
 chmod +x "$BIN_DIR/claude-perm-kitty"
 
+# Install stats wrapper
+cat > "$BIN_DIR/perm-stats" << WRAPPER
+#!/usr/bin/env bash
+source "$SCRIPT_DIR/.venv/bin/activate"
+exec python "$SCRIPT_DIR/src/stats.py" "\$@"
+WRAPPER
+chmod +x "$BIN_DIR/perm-stats"
+
 # Install hook wrapper (reuses same hook protocol)
 cat > "$BIN_DIR/claude-perm-hook-kitty" << WRAPPER
 #!/usr/bin/env bash

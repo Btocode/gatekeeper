@@ -12,7 +12,12 @@ import sys
 import time
 from datetime import datetime
 
-LOG_FILE = os.path.expanduser("~/.claude/perm-manager.log")
+LOG_DIR  = os.path.expanduser("~/.claude/perm-logs")
+os.makedirs(LOG_DIR, exist_ok=True)
+
+
+def _log_file() -> str:
+    return os.path.join(LOG_DIR, f"{datetime.now().strftime('%Y-%m-%d')}.log")
 
 import blessed
 
@@ -72,7 +77,7 @@ def _get_own_window() -> int:
 
 def _log(entry: dict) -> None:
     try:
-        with open(LOG_FILE, "a") as f:
+        with open(_log_file(), "a") as f:
             f.write(json.dumps({"ts": datetime.now().isoformat(), **entry}) + "\n")
     except Exception:
         pass
