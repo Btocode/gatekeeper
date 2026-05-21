@@ -428,7 +428,11 @@ def _x11_inject(window_id: int, text: str) -> bool:
                 if ks:
                     _fake(ks, shift)
 
-        _time.sleep(0.02)
+        # d.sync() waits until the X server has processed ALL events (including
+        # the final Return key) before we restore focus — without this the Enter
+        # can land in the wrong window because focus is restored too soon.
+        d.sync()
+        _time.sleep(0.05)
 
         # Restore previous focus
         try:

@@ -128,12 +128,25 @@ Links persist in `~/.claude/perm-window-map.json`.
 
 ## Sending messages
 
-Press `M`, type your message, press `Enter`. The text is injected into the linked Claude terminal as real keyboard input — Claude reads it as if you typed it there.
+Press `M`, type your message, press `Enter`. Gatekeeper injects the text into the linked Claude terminal using X11 XTEST — it appears **and submits automatically**, exactly as if you typed it and pressed Enter there. No need to switch to that terminal.
 
 Useful for:
+- Answering Claude's mid-task questions (`A / B / C?`) without switching windows
 - Explaining why you denied a request
-- Redirecting Claude mid-task without switching windows
-- Checking in on a long-running session
+- Redirecting Claude to a different approach while it waits
+
+Requires the session to be linked first (`L` key).
+
+### Tabs vs windows
+
+Message injection works when each Claude session runs in its own terminal **window**. If multiple sessions share one window as **tabs**, all tabs have the same X11 window ID — Gatekeeper cannot distinguish between them.
+
+| Setup | Message injection |
+|-------|-------------------|
+| Each session in its own window | ✅ Works |
+| Sessions as tabs in one window | ❌ Cannot target specific tab |
+
+**Workaround:** open each Claude session in a new terminal window instead of a new tab (`kitty`, `gnome-terminal --window`, etc.).
 
 ---
 
