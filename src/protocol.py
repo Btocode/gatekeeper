@@ -16,6 +16,7 @@ class Request:
     tool_input: dict[str, Any]
     cwd: str
     timestamp: float = field(default_factory=time.time)
+    tty_path: str   = ""     # controlling TTY of the Claude process, e.g. /dev/pts/1
 
     def age_str(self) -> str:
         elapsed = int(time.time() - self.timestamp)
@@ -41,6 +42,7 @@ class Request:
             "tool_input": self.tool_input,
             "cwd": self.cwd,
             "timestamp": self.timestamp,
+            "tty_path": self.tty_path,
         }) + "\n"
 
     @classmethod
@@ -53,6 +55,7 @@ class Request:
             tool_input=d["tool_input"],
             cwd=d["cwd"],
             timestamp=d.get("timestamp", time.time()),
+            tty_path=d.get("tty_path", ""),
         )
 
 

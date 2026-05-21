@@ -16,7 +16,7 @@ import blessed
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from src.protocol import HistoryEntry, Request, SOCKET_PATH
 from src.server import RequestQueue, serve_unix_socket
-from src.sessions import SessionRegistry, find_kitty_window_for_session, kitty_available, send_to_kitty_window
+from src.sessions import SessionRegistry, kitty_available, send_message_to_session
 from src.ui import FOCUS_QUEUE, FOCUS_SESSIONS, Renderer, UIState, term
 
 
@@ -37,7 +37,7 @@ async def run() -> None:
     # ── socket server ─────────────────────────────────────────────────────────
 
     async def on_request(request: Request, writer: asyncio.StreamWriter) -> None:
-        registry.touch(request.session_id, request.cwd)
+        registry.touch(request.session_id, request.cwd, request.tty_path)
         state.dirty = True
 
     server = await serve_unix_socket(SOCKET_PATH, queue, on_request)
@@ -70,23 +70,18 @@ async def run() -> None:
             command_summary=r.summary_command(),
             decision=decision,
         ))
-        registry.touch(r.session_id, r.cwd)
+        registry.touch(r.session_id, r.cwd, r.tty_path)
         queue.remove(r.id)
         if state.q_cursor >= len(queue.pending) and state.q_cursor > 0:
             state.q_cursor -= 1
         state.dirty = True
 
-    # ── send message to session via Kitty ─────────────────────────────────────
+    # ── send message to session ────────────────────────────────────────────────
 
-    async def send_message(session_id: str, cwd: str, text: str) -> bool:
-        if not state.kitty_ok:
-            return False
-        win_id = await loop.run_in_executor(
-            None, find_kitty_window_for_session, session_id, cwd
+    async def send_message(session, text: str) -> tuple[bool, str]:
+        return await loop.run_in_executor(
+            None, send_message_to_session, session, text
         )
-        if win_id is None:
-            return False
-        return await loop.run_in_executor(None, send_to_kitty_window, win_id, text)
 
     # ── main loop ─────────────────────────────────────────────────────────────
 
@@ -119,14 +114,10 @@ async def run() -> None:
                             if msg:
                                 sessions = registry.active()
                                 if sessions:
-                                    s = sessions[state.s_cursor]
-                                    await loop.run_in_executor(
-                                        None,
-                                        lambda: send_to_kitty_window(
-                                            find_kitty_window_for_session(s.session_id, s.cwd) or -1,
-                                            msg,
-                                        )
-                                    )
+                                    s = sessions[min(state.s_cursor, len(sessions)-1)]
+                                    ok, method = await send_message(s, msg)
+                                    # briefly show result in status
+                                    _ = (ok, method)
                             state.composing   = False
                             state.message_buf = ""
                             state.dirty = True

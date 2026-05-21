@@ -14,6 +14,23 @@ def read_hook_input() -> dict[str, Any]:
     return json.load(sys.stdin)
 
 
+def _parent_tty() -> str:
+    """Find the controlling TTY of the Claude process that spawned this hook."""
+    try:
+        ppid = os.getppid()
+        import subprocess
+        r = subprocess.run(
+            ["ps", "-p", str(ppid), "-o", "tty="],
+            capture_output=True, text=True, timeout=1
+        )
+        tty = r.stdout.strip()
+        if tty and tty != "?":
+            return f"/dev/{tty}"
+    except Exception:
+        pass
+    return ""
+
+
 def make_request(hook_input: dict[str, Any]) -> Request:
     return Request(
         id=str(uuid.uuid4()),
@@ -21,6 +38,7 @@ def make_request(hook_input: dict[str, Any]) -> Request:
         tool_name=hook_input.get("tool_name", "unknown"),
         tool_input=hook_input.get("tool_input", {}),
         cwd=hook_input.get("cwd", os.getcwd()),
+        tty_path=_parent_tty(),
     )
 
 
@@ -69,7 +87,7 @@ def ask_in_terminal(request: Request) -> int | tuple[int, str]:
 
 
 # Only these tools have side effects — everything else auto-allows
-NEEDS_PERMISSION = {"Bash", "Edit", "Write", "NotebookEdit", "Agent"}
+NEEDS_PERMISSION = {"Bash", "Edit", "NotebookEdit", "Agent"}
 
 
 def main() -> None:
