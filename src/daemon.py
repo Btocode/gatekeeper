@@ -132,18 +132,18 @@ async def run() -> None:
                 if state.linking:
                     if k:
                         ks = str(k)
-                        if k.name == "KEY_ESCAPE":
+                        if k.name == "KEY_ESCAPE" or ks == "q":
                             state.linking = False
                             state.dirty   = True
-                        elif k.name in ("KEY_UP",) or ks == "k":
+                        elif k.name == "KEY_UP" or ks == "k":
                             if state.link_cursor > 0:
                                 state.link_cursor -= 1
                                 state.dirty = True
-                        elif k.name in ("KEY_DOWN",) or ks == "j":
+                        elif k.name == "KEY_DOWN" or ks == "j":
                             if state.link_cursor < len(state.link_wins) - 1:
                                 state.link_cursor += 1
                                 state.dirty = True
-                        elif k.name in ("KEY_ENTER", "\n", "\r") or ks in ("\n", "\r"):
+                        elif k.name == "KEY_ENTER" or ks in ("\n", "\r"):
                             if state.link_wins:
                                 wid, _ = state.link_wins[state.link_cursor]
                                 registry.pin_window(state.link_session, wid)
