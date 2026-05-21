@@ -51,11 +51,25 @@ pre[:] = [e for e in pre if not any(
 
 pre.append({"matcher": "", "hooks": [{"type": "command", "command": hook_cmd}]})
 
+# Blanket allow rules — suppress Claude Code's own dialogs so Gatekeeper
+# is the sole approval mechanism. Use ** to match path separators (/).
+perms = settings.setdefault("permissions", {})
+allow = perms.setdefault("allow", [])
+needed = [
+    "Bash(**)", "Edit(**)", "Write(**)", "Read(**)",
+    "WebSearch(**)", "WebFetch(**)", "TodoWrite", "Agent(**)",
+    "NotebookRead(**)", "NotebookEdit(**)",
+]
+for rule in needed:
+    if rule not in allow:
+        allow.append(rule)
+
 with open(settings_path, "w") as f:
     json.dump(settings, f, indent=2)
     f.write("\n")
 
 print(f"Registered hook → {hook_cmd}")
+print(f"Blanket allow rules added ({len(needed)} rules)")
 PYEOF
 
 echo ""
