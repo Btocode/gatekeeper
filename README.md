@@ -12,32 +12,11 @@ When you run multiple Claude Code sessions across terminals or IDE windows, each
 
 ## What it looks like
 
-```
-+-------------------------------------------------------------------+
-| ✦ GATEKEEPER                  | 2 pending  ✓ 5  ✗ 0  00:12:34   |
-+----------------------+------------------+-------------------------+
-| SESSIONS(3)          | QUEUE(2)         | DETAIL                  |
-|                      |                  |                         |
-| > a8ed1d57 [linked]  | > Bash    12s    |  Session  a8ed1d57     |
-|   ~/myproject        |   npm install    |  Tool     Bash          |
-|   pts/2  5 calls     |                  |  CWD      ~/myproject   |
-|                      |   Edit     3s    |  Age      12s           |
-|   b73f7ccc [auto]    |   src/auth.ts    |         [####----] 33%  |
-|   ~/other  12 calls  |                  |                         |
-|                      |                  |  Command                |
-|   74a4bda3           |                  |   npm install           |
-|   ~  2 calls         |                  |   --save-dev jest       |
-|                      |                  |                         |
-| HISTORY(7)           |                  |   A:ALLOW     D:DENY   |
-|  A Bash git status   |                  |                         |
-|  A Edit src/db.py    |                  |   M  send message       |
-+----------------------+------------------+-------------------------+
-  Tab pane  jk nav  A allow/auto  D deny  M message  L link  Q quit
-```
+![Gatekeeper screenshot](assets/screenshot.png)
 
-**Left pane** — all active Claude sessions with status badges  
+**Left pane** — all active Claude sessions with status badges (`[auto]` = auto-approve enabled)  
 **Middle pane** — pending permission requests with age timer  
-**Right pane** — full request detail with approve/deny
+**Right pane** — full request detail, danger warnings, approve/deny buttons
 
 ---
 
