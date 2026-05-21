@@ -462,19 +462,43 @@ async def run() -> None:
                     state.dirty = False
 
         finally:
+            # Close all pending socket connections
+            for item in list(queue.pending):
+                if item.writer and not item.writer.is_closing():
+                    try:
+                        item.writer.close()
+                    except Exception:
+                        pass
+
             server.close()
             try:
-                await server.wait_closed()
+                await asyncio.wait_for(server.wait_closed(), timeout=2.0)
             except Exception:
                 pass
+
             if os.path.exists(SOCKET_PATH):
                 os.unlink(SOCKET_PATH)
+
             sys.stdout.write(term.normal + term.home + term.clear)
             sys.stdout.flush()
 
 
+def _suppress_closed_loop(loop, context):
+    """Silence the harmless 'Event loop is closed' error from StreamWriter GC."""
+    exc = context.get("exception")
+    if isinstance(exc, RuntimeError) and "Event loop is closed" in str(exc):
+        return
+    loop.default_exception_handler(context)
+
+
 def main() -> None:
-    asyncio.run(run())
+    loop = asyncio.new_event_loop()
+    loop.set_exception_handler(_suppress_closed_loop)
+    asyncio.set_event_loop(loop)
+    try:
+        loop.run_until_complete(run())
+    finally:
+        loop.close()
 
 
 if __name__ == "__main__":
