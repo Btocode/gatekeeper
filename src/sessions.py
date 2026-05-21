@@ -254,6 +254,37 @@ def _x11_inject(window_id: int, text: str) -> bool:
 
 # ── send message ──────────────────────────────────────────────────────────────
 
+def discover_running_sessions(registry: "SessionRegistry") -> None:
+    """
+    Scan running `claude` processes and pre-populate the registry so sessions
+    appear immediately on daemon start without waiting for a hook call.
+    """
+    try:
+        r = subprocess.run(
+            ["ps", "-C", "claude", "-o", "pid=,tty="],
+            capture_output=True, text=True, timeout=3,
+        )
+        for line in r.stdout.strip().splitlines():
+            parts = line.split()
+            if len(parts) < 2:
+                continue
+            pid_str, tty = parts[0].strip(), parts[1].strip()
+            if not pid_str.isdigit() or tty == "?":
+                continue
+            pid = int(pid_str)
+            try:
+                cwd       = os.readlink(f"/proc/{pid}/cwd")
+                tty_path  = f"/dev/{tty}"
+                term_pid  = find_terminal_pid(pid)
+                # Use pid-based synthetic session_id (prefixed so real sessions override later)
+                session_id = f"pid:{pid}"
+                registry.touch(session_id, cwd, tty_path, term_pid)
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+
 def list_injectable_windows(terminal_pid: int) -> list[tuple[int, str]]:
     """Return all non-daemon windows for the terminal emulator, for user to pick from."""
     windows = _x11_windows_for_pid(terminal_pid)

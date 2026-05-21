@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from src.protocol import HistoryEntry, Request, SOCKET_PATH
 from src.server import RequestQueue, serve_unix_socket
 from src.sessions import (SessionRegistry, kitty_available, send_message_to_session,
-                          list_injectable_windows)
+                          list_injectable_windows, discover_running_sessions)
 from src.ui import FOCUS_QUEUE, FOCUS_SESSIONS, Renderer, UIState, term
 
 
@@ -44,7 +44,11 @@ async def run() -> None:
     renderer = Renderer(state)
 
     state.kitty_ok    = await loop.run_in_executor(None, kitty_available)
-    state.linking      = False
+    state.linking     = False
+
+    # Pre-populate sessions from running Claude processes
+    await loop.run_in_executor(None, discover_running_sessions, registry)
+    state.dirty = True
     state.link_wins    = []
     state.link_cursor  = 0
     state.link_session = ""
@@ -120,6 +124,10 @@ async def run() -> None:
                 if state.tick % 8 == 0:
                     state.dirty = True   # drive animations + age updates
 
+                # ── periodic session rescan (every 30s) ───────────────────────
+                if state.tick % 600 == 0:   # 600 * 50ms = 30s
+                    await loop.run_in_executor(None, discover_running_sessions, registry)
+
                 # ── link picker mode ──────────────────────────────────────────
                 if state.linking:
                     if k:
@@ -127,7 +135,7 @@ async def run() -> None:
                         if k.name == "KEY_ESCAPE":
                             state.linking = False
                             state.dirty   = True
-                        elif key.name in ("KEY_UP",) or ks == "k":
+                        elif k.name in ("KEY_UP",) or ks == "k":
                             if state.link_cursor > 0:
                                 state.link_cursor -= 1
                                 state.dirty = True
