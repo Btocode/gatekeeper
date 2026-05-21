@@ -430,35 +430,33 @@ class Renderer:
         E(term.move(h-2, 0) + BG2 + _pad(keys, w) + term.normal)
         E(term.move(h-1, 0) + BG2 + " " * w + term.normal)
 
-    def draw_link_picker(self, state) -> None:
-        """Overlay: pick which X11 window to pin to the selected session."""
-        h, w  = term.height, term.width
-        wins  = state.link_wins
-        bw    = min(w - 6, 70)
-        col   = (w - bw - 4) // 2
-        row   = h - 4 - len(wins) - 4
+    def draw_link_overlay(self, state) -> None:
+        """Overlay: instruct user to switch to their Claude terminal to link it."""
+        h, w = term.height, term.width
+        bw   = min(w - 6, 64)
+        col  = (w - bw - 4) // 2
+        row  = h // 2 - 4
 
+        sid  = state.link_session[:8]
         out: list[str] = []
         E = out.append
 
+        lines = [
+            f"  {YELLOW}{term.bold}Linking session {sid}{term.normal}",
+            "",
+            f"  {FG}Switch to the Claude terminal window{term.normal}",
+            f"  {FG}you want to link, then come back.{term.normal}",
+            "",
+            f"  {DIM}The daemon will detect the switch{term.normal}",
+            f"  {DIM}and link it automatically.{term.normal}",
+            "",
+            f"  {DIM}Esc to cancel{term.normal}",
+        ]
+
         E(term.move(row,   col) + BG2 + DIM + "+" + "-" * bw + "+" + term.normal)
-        E(term.move(row+1, col) + BG2 + YELLOW + term.bold
-          + _pad(f"|  Link session {state.link_session[:8]} to a window:", bw+1) + "|"
-          + term.normal)
-        E(term.move(row+2, col) + BG2 + DIM + "+" + "-" * bw + "+" + term.normal)
-
-        for i, (wid, title) in enumerate(wins):
-            sel  = i == state.link_cursor
-            bg   = BG3 if sel else BG2
-            arr  = f"{YELLOW}>{term.normal}" if sel else " "
-            line = f"|  {arr} {_clamp(title or 'Terminal', bw-6)}  [win/{wid}]"
-            E(term.move(row+3+i, col) + bg + _pad(line, bw+1) + DIM + "|" + term.normal)
-
-        last = row + 3 + len(wins)
-        E(term.move(last,   col) + BG2 + DIM + "+" + "-" * bw + "+" + term.normal)
-        E(term.move(last+1, col) + BG2 + DIM
-          + _pad("|  Enter=select  Esc=cancel", bw+1) + "|" + term.normal)
-        E(term.move(last+2, col) + BG2 + DIM + "+" + "-" * bw + "+" + term.normal)
+        for i, line in enumerate(lines):
+            E(term.move(row+1+i, col) + BG3 + _pad("| " + line, bw+1) + DIM + "|" + term.normal)
+        E(term.move(row+1+len(lines), col) + BG2 + DIM + "+" + "-" * bw + "+" + term.normal)
 
         sys.stdout.write("".join(out))
         sys.stdout.flush()

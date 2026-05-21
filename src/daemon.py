@@ -28,6 +28,48 @@ async def _key(loop: asyncio.AbstractEventLoop):
     return await loop.run_in_executor(None, lambda: term.inkey(timeout=0.05))
 
 
+def _get_focused_window() -> int:
+    """Return the currently focused X11 window ID, or 0 on failure."""
+    try:
+        from Xlib import display, X
+        d    = display.Display()
+        atom = d.intern_atom("_NET_ACTIVE_WINDOW")
+        prop = d.screen().root.get_full_property(atom, X.AnyPropertyType)
+        if prop and prop.value:
+            return int(prop.value[0])
+    except Exception:
+        pass
+    return 0
+
+
+def _get_own_window() -> int:
+    """Return the X11 window ID of this process (the daemon terminal)."""
+    try:
+        from Xlib import display, X
+        d        = display.Display()
+        pid_atom = d.intern_atom("_NET_WM_PID")
+
+        def _walk(win) -> int:
+            try:
+                p = win.get_full_property(pid_atom, X.AnyPropertyType)
+                if p and p.value and int(p.value[0]) == os.getpid():
+                    return win.id
+            except Exception:
+                pass
+            try:
+                for child in win.query_tree().children:
+                    r = _walk(child)
+                    if r:
+                        return r
+            except Exception:
+                pass
+            return 0
+
+        return _walk(d.screen().root)
+    except Exception:
+        return 0
+
+
 def _log(entry: dict) -> None:
     try:
         with open(LOG_FILE, "a") as f:
@@ -43,8 +85,9 @@ async def run() -> None:
     state    = UIState(queue=queue, registry=registry)
     renderer = Renderer(state)
 
-    state.kitty_ok    = await loop.run_in_executor(None, kitty_available)
-    state.linking     = False
+    state.kitty_ok        = await loop.run_in_executor(None, kitty_available)
+    state.linking         = False
+    state.daemon_window_id = await loop.run_in_executor(None, _get_own_window)
 
     # Pre-populate sessions from running Claude processes
     await loop.run_in_executor(None, discover_running_sessions, registry)
@@ -128,30 +171,25 @@ async def run() -> None:
                 if state.tick % 600 == 0:   # 600 * 50ms = 30s
                     await loop.run_in_executor(None, discover_running_sessions, registry)
 
-                # ── link picker mode ──────────────────────────────────────────
+                # ── focus-to-link mode ────────────────────────────────────────
                 if state.linking:
+                    # Poll which X11 window is currently focused
+                    focused = await loop.run_in_executor(None, _get_focused_window)
+                    if focused and focused != state.daemon_window_id:
+                        # User switched to a non-daemon window — link it
+                        registry.pin_window(state.link_session, focused)
+                        _log({"type": "link", "session": state.link_session,
+                              "window": focused})
+                        state.linking = False
+                        state.dirty   = True
                     if k:
                         ks = str(k)
                         if k.name == "KEY_ESCAPE" or ks == "q":
                             state.linking = False
                             state.dirty   = True
-                        elif k.name == "KEY_UP" or ks == "k":
-                            if state.link_cursor > 0:
-                                state.link_cursor -= 1
-                                state.dirty = True
-                        elif k.name == "KEY_DOWN" or ks == "j":
-                            if state.link_cursor < len(state.link_wins) - 1:
-                                state.link_cursor += 1
-                                state.dirty = True
-                        elif k.name == "KEY_ENTER" or ks in ("\n", "\r"):
-                            if state.link_wins:
-                                wid, _ = state.link_wins[state.link_cursor]
-                                registry.pin_window(state.link_session, wid)
-                            state.linking = False
-                            state.dirty   = True
                     if state.dirty or (now - last_draw) > 0.1:
                         renderer.draw()
-                        renderer.draw_link_picker(state)
+                        renderer.draw_link_overlay(state)
                         last_draw   = now
                         state.dirty = False
                     continue
@@ -233,17 +271,12 @@ async def run() -> None:
                     await resolve("deny")
 
                 elif ks in ("l", "L"):
-                    # Link selected session to an X11 window
                     sessions = registry.active()
                     if sessions:
                         s = sessions[min(state.s_cursor, len(sessions)-1)]
-                        wins = list_injectable_windows(s.terminal_pid or 11297)
-                        if wins:
-                            state.linking      = True
-                            state.link_wins    = wins
-                            state.link_cursor  = 0
-                            state.link_session = s.session_id
-                            state.dirty        = True
+                        state.linking      = True
+                        state.link_session = s.session_id
+                        state.dirty        = True
 
                 elif ks in ("m", "M"):
                     sessions = registry.active()
