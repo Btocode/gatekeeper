@@ -1,51 +1,72 @@
-# claude-perm-kitty
+# Gatekeeper
 
-A terminal dashboard that aggregates **all Claude Code permission prompts** from every active session into one place — so you never have to switch terminals to approve a tool call.
+**One terminal to rule all your Claude Code sessions.**
+
+When you run multiple Claude Code sessions across terminals or IDE windows, each one asks for permission in its own terminal. Gatekeeper intercepts every request and routes them to a single dashboard — you approve, deny, or auto-approve without switching windows.
 
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![Platform](https://img.shields.io/badge/platform-Linux%20%28X11%29-lightgrey)
+![License](https://img.shields.io/badge/license-MIT-green)
+
+---
+
+## What it looks like
 
 ```
-+----------------------------------------------------+----------------------------------+
-| SESSIONS(2)          | QUEUE(1)        | DETAIL                            |
-|                      |                 |                                   |
-| > a8ed1d57 [linked]  | > Bash  12s     |  Session  a8ed1d57               |
-|   ~/myproject        |   npm install   |  Tool     Bash                    |
-|   pts/2  3 calls     |                 |  CWD      ~/myproject             |
-|                      |                 |  Waiting  12s [####----]  33%    |
-|   b73f7ccc [auto]    |                 |                                   |
-|   ~/other  7 calls   |                 |  Command                          |
-|                      |                 |   npm install --save-dev jest     |
-| HISTORY(14)          |                 |                                   |
-|  A Bash git status   |                 |   A:ALLOW     D:DENY              |
-|  A Edit src/auth.py  |                 |                                   |
-|                      |                 |   M  send message to this session |
-+----------------------------------------------------+----------------------------------+
++-------------------------------------------------------------------+
+| ✦ GATEKEEPER                  | 2 pending  ✓ 5  ✗ 0  00:12:34   |
++----------------------+------------------+-------------------------+
+| SESSIONS(3)          | QUEUE(2)         | DETAIL                  |
+|                      |                  |                         |
+| > a8ed1d57 [linked]  | > Bash    12s    |  Session  a8ed1d57     |
+|   ~/myproject        |   npm install    |  Tool     Bash          |
+|   pts/2  5 calls     |                  |  CWD      ~/myproject   |
+|                      |   Edit     3s    |  Age      12s           |
+|   b73f7ccc [auto]    |   src/auth.ts    |         [####----] 33%  |
+|   ~/other  12 calls  |                  |                         |
+|                      |                  |  Command                |
+|   74a4bda3           |                  |   npm install           |
+|   ~  2 calls         |                  |   --save-dev jest       |
+|                      |                  |                         |
+| HISTORY(7)           |                  |   A:ALLOW     D:DENY   |
+|  A Bash git status   |                  |                         |
+|  A Edit src/db.py    |                  |   M  send message       |
++----------------------+------------------+-------------------------+
   Tab pane  jk nav  A allow/auto  D deny  M message  L link  Q quit
 ```
 
+**Left pane** — all active Claude sessions with status badges  
+**Middle pane** — pending permission requests with age timer  
+**Right pane** — full request detail with approve/deny
+
+---
+
 ## Features
 
-- **Single approval terminal** — all Claude sessions route here
-- **Session tracking** — shows all active Claude sessions immediately on start
-- **Auto-approve** — mark safe sessions to silently allow routine tool calls
-- **Danger guard** — `rm`, SQL mutations, `ssh`, `sudo`, `--force` always require manual approval even on auto sessions
-- **Message injection** — send messages to a specific Claude session directly from the dashboard
-- **Per-session window linking** — `L` to link a session to its terminal tab
-- **Daily logs** — `perm-stats` shows allow/deny history and auto-approve rates
-- **Terminal fallback** — if the daemon isn't running, prompts appear inline in the Claude terminal
+- **Unified approval terminal** — all Claude sessions route here regardless of where they run
+- **Sessions shown immediately** — reads `~/.claude/sessions/` on startup, no waiting for a hook call
+- **Auto-approve per session** — mark trusted sessions to silently pass routine tool calls
+- **Hard safety rules** — `rm`, `ssh`, `sudo`, `--force`, SQL mutations, writes to `/etc/` always require manual approval, even on auto sessions
+- **Message injection** — type a message in Gatekeeper and it appears in the target Claude terminal as keyboard input
+- **Window linking** — link each session to its terminal tab so messages go to exactly the right window
+- **Daily logs + stats** — every decision is recorded; `gatekeeper stats` shows rates by day and session
+- **Terminal fallback** — if Gatekeeper is not running, a `Y/n` prompt appears in the Claude terminal so nothing hangs
+
+---
 
 ## Requirements
 
-- **Linux** with X11 (DISPLAY set)
+- **Linux** with X11 (`echo $DISPLAY` should show `:0` or similar)
 - **Python 3.11+**
 - **Claude Code CLI**
-- **gnome-terminal** (or compatible terminal emulator — Kitty, Alacritty, etc.)
+- Any X11 terminal emulator (gnome-terminal, Kitty, Alacritty, etc.)
 
-## Install
+---
+
+## Installation
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/claude-perm-kitty
+git clone https://github.com/Btocode/claude-perm-kitty
 cd claude-perm-kitty
 python3 -m venv .venv
 source .venv/bin/activate
@@ -54,9 +75,12 @@ bash install.sh
 ```
 
 `install.sh` does three things:
-1. Creates wrapper scripts in `~/.claude/bin/`
-2. Registers the `PreToolUse` hook in `~/.claude/settings.json`
-3. Adds blanket allow rules so Claude Code's own dialogs are suppressed (our hook becomes the sole gatekeeper)
+
+1. Installs wrapper scripts in `~/.claude/bin/`
+2. Registers a `PreToolUse` hook in `~/.claude/settings.json` — Claude Code calls this before every tool use
+3. Adds blanket `permissions.allow` rules so Claude Code's own dialogs are suppressed — Gatekeeper becomes the sole approval mechanism
+
+---
 
 ## Usage
 
@@ -66,71 +90,151 @@ Open a dedicated terminal and run:
 claude-perm-kitty
 ```
 
-Start your Claude Code sessions normally anywhere. Every `Bash`, `Edit`, `Agent` call routes to the dashboard.
+Start your Claude Code sessions anywhere — other terminals, VS Code, JetBrains, anywhere. Every `Bash`, `Edit`, `Write`, or `Agent` call will appear in Gatekeeper.
 
-### Keyboard shortcuts
+---
 
-| Key | Context | Action |
-|-----|---------|--------|
-| `Tab` | anywhere | Switch focus between Sessions / Queue pane |
-| `↑↓` / `j k` | any pane | Navigate |
-| `A` | Queue pane | Allow selected request |
-| `A` | Sessions pane | Toggle auto-approve for selected session |
-| `D` | Queue pane | Deny selected request |
-| `M` | anywhere | Send a message to selected session |
-| `L` | Sessions pane | Link session to a terminal window |
-| `Q` | anywhere | Quit |
+## Keyboard shortcuts
 
-### Session linking
+| Key | Pane | Action |
+|-----|------|--------|
+| `Tab` | any | Switch focus between Sessions and Queue |
+| `↑` / `k` | any | Move up |
+| `↓` / `j` | any | Move down |
+| `A` | Queue | Allow the selected request |
+| `A` | Sessions | Toggle auto-approve for the selected session |
+| `D` | Queue | Deny the selected request |
+| `M` | any | Send a message to the selected session |
+| `L` | Sessions | Link the session to a terminal window |
+| `Q` | any | Quit |
 
-Linking tells the daemon which terminal window belongs to which session, so `M` sends messages to exactly the right place:
+---
+
+## Auto-approve
+
+Mark a session (`A` in the Sessions pane) to silently allow all its tool calls. The session shows `[auto]` — you only see requests that need your attention.
+
+### What auto-approve never skips
+
+No matter what, these always require manual approval:
+
+| Category | What's blocked |
+|----------|----------------|
+| File deletion | `rm`, `rmdir`, `shred` |
+| Remote access | `ssh`, `scp`, `rsync`, `sftp` |
+| Privilege escalation | `sudo`, `su` |
+| Service control | `systemctl stop/disable`, `service stop` |
+| Containers | `docker rm/kill/prune`, `kubectl delete` |
+| Infrastructure | `terraform apply/destroy` |
+| Destructive git | `push --force`, `reset --hard`, `clean -f` |
+| Sensitive paths | Writes to `/etc/`, `/usr/`, `~/.ssh/`, `~/.aws/` |
+| Disk ops | `dd`, `mkfs`, `fdisk` |
+
+Read-only commands — `grep`, `find`, `ls`, `cat`, `git status`, `npm install`, `SELECT` queries — always pass through auto-approve freely.
+
+---
+
+## Session linking
+
+Linking maps a Claude session to its terminal window so the `M` (message) key knows exactly where to send input.
 
 1. `Tab` to the Sessions pane, navigate to a session
 2. Press `L` — an overlay appears
-3. Switch to the Claude terminal tab you want to link
-4. The daemon detects the focus change and links it automatically
+3. Switch to the Claude terminal tab (alt+tab, click, etc.)
+4. Gatekeeper detects the focus change and links automatically — session shows `[linked]`
 
-### Auto-approve
+Links persist in `~/.claude/perm-window-map.json`.
 
-Mark a session as auto-approve (`A` in the Sessions pane) to silently allow all routine tool calls without prompting. The following are **always blocked** from auto-approve regardless:
+---
 
-- `rm`, `rmdir`, `shred`, `truncate`
-- `DROP TABLE`, `DELETE FROM`, `TRUNCATE`, `UPDATE ... SET`
-- `ssh`, `scp`, `rsync`, `sudo`, `kubectl delete`, `terraform destroy`
-- `git push --force`, `git reset --hard`
-- Writes to `/etc/`, `/usr/`, `~/.ssh/`, `~/.aws/`
+## Sending messages
 
-### Stats
+Press `M`, type your message, press `Enter`. The text is injected into the linked Claude terminal as real keyboard input — Claude reads it as if you typed it there.
+
+Useful for:
+- Explaining why you denied a request
+- Redirecting Claude mid-task without switching windows
+- Checking in on a long-running session
+
+---
+
+## Stats
 
 ```bash
-perm-stats        # today
-perm-stats 7      # last 7 days
-perm-stats all    # all time
+perm-stats          # today
+perm-stats 7        # last 7 days
+perm-stats all      # all time
 ```
 
-Logs live in `~/.claude/perm-logs/YYYY-MM-DD.log`.
+```
+====================================================
+ GATEKEEPER STATS
+====================================================
+  Total decisions : 177
+  Auto-approved   :   16  (  9%)
+  Manual reviewed :  161  ( 90%)
+    allowed       :  161
+    denied        :    0
+
+  Auto-approved by session:
+    b73f7ccc    7 calls
+    a8ed1d57    5 calls
+
+  Auto-approved by tool:
+    Bash             11
+    Edit              5
+====================================================
+```
+
+Logs live in `~/.claude/perm-logs/YYYY-MM-DD.log`, one file per day, kept indefinitely.
+
+---
 
 ## How it works
 
 ```
-Claude session A    Claude session B    Claude session C
-      │                   │                   │
-  PreToolUse hook     PreToolUse hook     PreToolUse hook
-  (blocks Claude)     (blocks Claude)     (blocks Claude)
-      └───────────────────┼───────────────────┘
-                          │  Unix socket
-                          ▼
-               claude-perm-kitty daemon
-               (your dedicated terminal)
+  Claude session A         Claude session B         Claude session C
+  (any terminal/IDE)       (any terminal/IDE)       (any terminal/IDE)
+        │                        │                        │
+  PreToolUse hook          PreToolUse hook          PreToolUse hook
+  (blocks Claude)          (blocks Claude)          (blocks Claude)
+        └────────────────────────┼────────────────────────┘
+                                 │  Unix socket
+                                 ▼
+                    ┌────── Gatekeeper daemon ──────┐
+                    │   blessed TUI                 │
+                    │   asyncio socket server       │
+                    │   session registry            │
+                    └───────────────────────────────┘
+                             (your terminal)
 ```
 
-A `PreToolUse` hook fires before every tool call. It connects to the daemon's Unix socket at `/tmp/claude-perm-$USER.sock`, sends the request, and waits. The daemon shows it in the UI. When you press `A` or `D`, the daemon sends the decision back and the hook exits — Claude proceeds or stops.
+A `PreToolUse` hook fires before every tool call in every Claude session. It connects to Gatekeeper's Unix socket at `/tmp/claude-perm-$USER.sock`, sends the request, and waits. Gatekeeper shows the request in the UI. When you press `A` or `D`, the decision travels back through the socket — Claude proceeds or stops.
 
-If the daemon isn't running the hook falls back to a `Y/n` prompt in the Claude terminal.
+Sessions are discovered at startup by reading `~/.claude/sessions/*.json` (the same files used by `claude /resume`), so all running sessions appear immediately.
+
+If Gatekeeper is not running, the hook falls back to a `Y/n` prompt in the Claude terminal — nothing hangs.
+
+---
+
+## Files
+
+| Path | Purpose |
+|------|---------|
+| `~/.claude/bin/claude-perm-kitty` | Gatekeeper daemon |
+| `~/.claude/bin/claude-perm-hook-kitty` | Hook called by Claude Code |
+| `~/.claude/bin/perm-stats` | Stats command |
+| `~/.claude/perm-logs/YYYY-MM-DD.log` | Daily decision logs |
+| `~/.claude/perm-window-map.json` | Session → window links |
+| `~/.claude/perm-auto-approve.json` | Auto-approve session list |
+
+---
 
 ## Uninstall
 
-Remove the `PreToolUse` hook entry from `~/.claude/settings.json` and the `permissions.allow` block added by the installer.
+Remove the `hooks` and `permissions` blocks added by `install.sh` from `~/.claude/settings.json`. Claude Code's own permission dialogs will return.
+
+---
 
 ## License
 
