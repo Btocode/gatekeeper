@@ -224,7 +224,7 @@ async def run() -> None:
                 now = time.time()
 
                 state.tick += 1
-                if state.tick % 8 == 0:
+                if state.tick % 8 == 0 and not state.settings_open and not state.linking:
                     state.dirty = True   # drive animations + age updates
 
                 # ── periodic session rescan (every 30s) ───────────────────────
@@ -309,7 +309,7 @@ async def run() -> None:
                                 state.settings_input = ""
                                 state.dirty = True
 
-                    if state.dirty or (now - last_draw) > 0.1:
+                    if state.dirty:
                         renderer.draw()
                         renderer.draw_settings(state)
                         last_draw   = now
