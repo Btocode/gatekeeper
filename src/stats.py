@@ -48,7 +48,7 @@ def show_stats(entries: list[dict]) -> None:
 
     W = 52
     print("=" * W)
-    print(" PERMISSION MANAGER STATS")
+    print(" GATEKEEPER STATS")
     print("=" * W)
     print(f"  Total decisions : {total}")
     if total:

@@ -199,7 +199,7 @@ class Renderer:
         E(term.move(0, 0) + BG2 + DIM + "+" + "-" * (w - 2) + "+" + term.normal)
 
         # Row 1: title + stats
-        title = " [CLAUDE PERMISSION MANAGER]"
+        title = " GATEKEEPER"
         stats = (f" {BLUE if n else GREEN}{spin}{term.normal}"
                  f"  {BLUE}{term.bold}{n}{term.normal} pending"
                  f"  {DIM}|{term.normal}"
