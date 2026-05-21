@@ -210,18 +210,28 @@ def send_message_to_session(session: Session, text: str) -> tuple[bool, str]:
     if not windows:
         return False, f"no X11 windows for PID {term_pid}"
 
-    # Exclude the daemon window
+    # Exclude the daemon window and other perm-manager windows
     eligible = [(wid, title) for wid, title in windows
-                if "claude-perm" not in title.lower()]
+                if "claude-perm" not in title.lower()
+                and "perm-manager" not in title.lower()]
 
     if not eligible:
         return False, "only daemon window found"
 
-    # Score each window by how much of the CWD appears in its title
-    cwd_parts = [p for p in session.cwd.replace(os.path.expanduser("~"), "~").split("/") if p]
-    best_wid, best_score = eligible[0][0], -1
+    # Score each window:
+    #  +5  non-generic title (not just "Terminal" or blank)
+    #  +1  each CWD segment found in title
+    #  +3  title contains "claude" (likely a Claude Code session tab)
+    GENERIC = {"terminal", "bash", "zsh", "sh", ""}
+    cwd_parts = [p for p in
+                 session.cwd.replace(os.path.expanduser("~"), "~").split("/") if p]
+    best_wid, best_score = eligible[0][0], -999
     for wid, title in eligible:
-        score = sum(1 for p in cwd_parts if p in title)
+        tl = title.lower().strip()
+        score  = 0
+        score += 0 if tl in GENERIC else 5
+        score += sum(1 for p in cwd_parts if p.lower() in tl)
+        score += 3 if "claude" in tl else 0
         if score > best_score:
             best_wid, best_score = wid, score
 
