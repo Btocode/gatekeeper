@@ -111,7 +111,8 @@ def ask_in_terminal(request: Request) -> int | tuple[int, str]:
             tty.flush()
             return 2, f"Auto-denied (timeout): {tool}({cmd})"
     except Exception:
-        return 0  # can't open tty — allow
+        # Can't open /dev/tty — deny rather than silently allow.
+        return 2, f"Permission check failed (no tty): {tool}({cmd})"
 
 
 # All tools with side effects — anything not listed here auto-allows
@@ -149,8 +150,9 @@ def main() -> None:
             print(message)
             sys.exit(code)
         sys.exit(result)
-    except Exception:
-        sys.exit(0)
+    except Exception as e:
+        print(f"Gatekeeper hook error: {e}")
+        sys.exit(2)
 
 
 if __name__ == "__main__":
