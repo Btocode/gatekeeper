@@ -236,7 +236,8 @@ async def run() -> None:
             if value not in cfg.custom_allow_patterns:
                 cfg.custom_allow_patterns.append(value)
             save_config(cfg)
-            cc_pattern = f"Bash({value.split()[0]}:*)"
+            # "Bash(**)" in user settings already covers all bash commands — no
+            # extra Claude Code allowlist entry needed for bash patterns.
             _log({"type": "persistent_allow", "kind": "bash_pattern", "value": value,
                   "session": request.session_id[:8], "tool": request.tool_name})
 
