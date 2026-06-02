@@ -77,6 +77,24 @@ def _get_own_window() -> int:
         return 0
 
 
+_CLAUDE_SETTINGS = os.path.expanduser("~/.claude/settings.json")
+
+
+def _add_to_claude_allowlist(pattern: str) -> None:
+    """Append pattern to Claude Code's permissions.allow in ~/.claude/settings.json."""
+    try:
+        with open(_CLAUDE_SETTINGS) as f:
+            data = json.load(f)
+        allow: list = data.setdefault("permissions", {}).setdefault("allow", [])
+        if pattern not in allow:
+            allow.append(pattern)
+            with open(_CLAUDE_SETTINGS, "w") as f:
+                json.dump(data, f, indent=2)
+                f.write("\n")
+    except Exception:
+        pass
+
+
 def _log(entry: dict) -> None:
     try:
         with open(_log_file(), "a") as f:
@@ -212,22 +230,38 @@ async def run() -> None:
         request      = queue.pending[state.q_cursor].request
         action_type, value = request.persistent_allow_action()
         cfg          = state.config
+        cc_pattern: str | None = None
+
         if action_type == "bash_pattern" and value:
             if value not in cfg.custom_allow_patterns:
                 cfg.custom_allow_patterns.append(value)
             save_config(cfg)
+            cc_pattern = f"Bash({value})"
             _log({"type": "persistent_allow", "kind": "bash_pattern", "value": value,
                   "session": request.session_id[:8], "tool": request.tool_name})
+
         elif action_type == "edit_dir" and value:
             if value not in cfg.allowed_edit_dirs:
                 cfg.allowed_edit_dirs.append(value)
             save_config(cfg)
+            tool = request.tool_name
+            if tool == "Write":
+                cc_pattern = f"Write({value}/**)"
+            elif tool == "NotebookEdit":
+                cc_pattern = f"NotebookEdit({value}/**)"
+            else:
+                cc_pattern = f"Edit({value}/**)"
             _log({"type": "persistent_allow", "kind": "edit_dir", "value": value,
                   "session": request.session_id[:8], "tool": request.tool_name})
+
         elif action_type == "auto_approve":
             registry.toggle_auto_approve(request.session_id)
             _log({"type": "persistent_allow", "kind": "auto_approve",
                   "session": request.session_id[:8]})
+
+        if cc_pattern:
+            _add_to_claude_allowlist(cc_pattern)
+
         await resolve("allow")
 
     # ── send message to session ────────────────────────────────────────────────
