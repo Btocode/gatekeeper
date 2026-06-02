@@ -265,7 +265,7 @@ async def run() -> None:
                 # ── settings mode ─────────────────────────────────────────────
                 if state.settings_open:
                     cfg = state.config
-                    from src.config import BASH_CATEGORIES, TOOL_TYPES, save_config
+                    from src.config import BASH_CATEGORIES, TOOL_TYPES
                     tool_keys = list(TOOL_TYPES.keys())
                     cat_keys  = list(BASH_CATEGORIES.keys())
 
