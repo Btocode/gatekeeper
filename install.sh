@@ -64,6 +64,13 @@ for rule in needed:
     if rule not in allow:
         allow.append(rule)
 
+# bypassPermissions disables Claude Code's own permission dialogs entirely so
+# the Gatekeeper PreToolUse hook is the sole approval gate.  The hook still
+# fires for every tool call; Claude Code's hardcoded sensitive-path prompts
+# (/proc/, /sys/, ~/.bashrc, etc.) are suppressed only in this mode.
+perms["defaultMode"] = "bypassPermissions"
+settings["skipDangerousModePermissionPrompt"] = True
+
 with open(settings_path, "w") as f:
     json.dump(settings, f, indent=2)
     f.write("\n")

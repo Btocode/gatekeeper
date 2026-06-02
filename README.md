@@ -16,16 +16,19 @@ When you run multiple Claude Code sessions across terminals or IDE windows, each
 
 **Left pane** — all active Claude sessions with status badges (`[auto]` = auto-approve enabled)  
 **Middle pane** — pending permission requests with age timer  
-**Right pane** — full request detail, danger warnings, approve/deny buttons
+**Right pane** — full request detail, danger warnings, and a numbered approval menu
 
 ---
 
 ## Features
 
 - **Unified approval terminal** — all Claude sessions route here regardless of where they run
+- **Claude Code-style numbered menu** — `1` allow once, `2` always allow (saves rule), `3` deny; `↑`/`↓` to move cursor, `Enter` to confirm
+- **Persistent allow (option 2)** — saves a rule to Gatekeeper config so the command skips the queue next time
 - **Sessions shown immediately** — reads `~/.claude/sessions/` on startup, no waiting for a hook call
 - **Auto-approve per session** — mark trusted sessions to silently pass routine tool calls
 - **Hard safety rules** — `rm`, `ssh`, `sudo`, `--force`, SQL mutations, writes to `/etc/` always require manual approval, even on auto sessions
+- **Sole permission gate** — `bypassPermissions` mode disables Claude Code's own dialogs; Gatekeeper is the only checkpoint
 - **Message injection** — type a message in Gatekeeper and it appears in the target Claude terminal as keyboard input
 - **Window linking** — link each session to its terminal tab so messages go to exactly the right window
 - **Daily logs + stats** — every decision is recorded; `gatekeeper stats` shows rates by day and session
@@ -53,11 +56,12 @@ pip install -r requirements.txt
 bash install.sh
 ```
 
-`install.sh` does three things:
+`install.sh` does four things:
 
 1. Installs wrapper scripts in `~/.claude/bin/`
 2. Registers a `PreToolUse` hook in `~/.claude/settings.json` — Claude Code calls this before every tool use
-3. Adds blanket `permissions.allow` rules so Claude Code's own dialogs are suppressed — Gatekeeper becomes the sole approval mechanism
+3. Adds blanket `permissions.allow` rules (`Bash(**)`, `Read(**)`, `Write(**)`, `Edit(**)`, …) using `**` to match path separators
+4. Sets `permissions.defaultMode = "bypassPermissions"` — disables Claude Code's built-in permission dialogs entirely so Gatekeeper is the sole approval gate (Claude Code's hardcoded sensitive-path prompts for `/proc/`, `/sys/`, `~/.bashrc`, etc. only suppress in this mode)
 
 ---
 
@@ -106,13 +110,19 @@ export GATEKEEPER_TIMEOUT=0
 | Key | Pane | Action |
 |-----|------|--------|
 | `Tab` | any | Switch focus between Sessions and Queue |
-| `↑` / `k` | any | Move up |
-| `↓` / `j` | any | Move down |
-| `A` | Queue | Allow the selected request |
+| `j` / `k` | any | Navigate queue items or sessions |
+| `↑` / `↓` | Queue | Move the approval cursor (1 / 2 / 3) |
+| `1` | Queue | Allow once |
+| `2` | Queue | Always allow — saves rule to config + Claude Code allowlist |
+| `3` | Queue | Deny |
+| `Enter` | Queue | Confirm highlighted option |
+| `A` | Queue | Allow once (shortcut) |
+| `D` | Queue | Deny (shortcut) |
 | `A` | Sessions | Toggle auto-approve for the selected session |
-| `D` | Queue | Deny the selected request |
 | `M` | any | Send a message to the selected session |
 | `L` | Sessions | Link the session to a terminal window |
+| `U` | Sessions | Unlink the session from its terminal window |
+| `S` | any | Open settings (tool types, bash categories, custom patterns) |
 | `Q` | any | Quit |
 
 ---
@@ -252,7 +262,7 @@ If Gatekeeper is not running, the hook falls back to a `Y/n` prompt in the Claud
 
 ## Uninstall
 
-Remove the `hooks` and `permissions` blocks added by `install.sh` from `~/.claude/settings.json`. Claude Code's own permission dialogs will return.
+Remove the `hooks` entry and reset `permissions.defaultMode` in `~/.claude/settings.json`. Claude Code's own permission dialogs will return.
 
 ---
 
