@@ -133,6 +133,8 @@ class UIState:
     s_cursor:           int  = 0
     selected_session_id: str = ""   # authoritative selection — survives reorder
 
+    action_cursor: int  = 0   # 0=Yes (allow once)  1=Yes always (persistent)  2=No (deny)
+
     composing:    bool = False
     message_buf:  str  = ""
 
@@ -432,12 +434,22 @@ class Renderer:
             dl.append(f"  {RED}{_clamp(danger_reason, inner-2)}{term.normal}")
             dl.append("")
 
-        # Action row
-        ab = f"{term.on_color_rgb(15,44,28)}{GREEN}{term.bold} A:ALLOW {term.normal}"
-        db = f"{term.on_color_rgb(56,18,22)}{RED}{term.bold}  D:DENY  {term.normal}"
-        dl.append(f"  {ab}   {db}")
+        # Action menu — Claude Code-style numbered options
+        dl.append(f"  {DIM}Do you want to proceed?{term.normal}")
         dl.append("")
-        dl.append(f"  {DIM}M  send message to this session{term.normal}")
+        options = [
+            ("Yes",                           GREEN),
+            (r.persistent_allow_label(),      CYAN),
+            ("No",                            RED),
+        ]
+        for i, (label, color) in enumerate(options):
+            sel   = (i == st.action_cursor)
+            arrow = f"{BLUE}>{term.normal}" if sel else " "
+            num   = f"{BLUE}{term.bold}{i + 1}{term.normal}"
+            text  = f"{color}{term.bold if sel else ''}{_clamp(label, inner - 7)}{term.normal}"
+            dl.append(f"  {arrow} {num}{DIM}.{term.normal} {text}")
+        dl.append("")
+        dl.append(f"  {DIM}Up/Down select  Enter confirm  M message{term.normal}")
 
         return dl
 
@@ -639,17 +651,19 @@ class Renderer:
 
     def _footer(self, E, h, w, st):
         if st.focus == FOCUS_SESSIONS:
-            a_hint = f"  {YELLOW}A{term.normal} toggle auto"
+            action_hints = f"  {YELLOW}A{term.normal} toggle auto  {RED}U{term.normal} unlink"
         else:
-            a_hint = f"  {GREEN}A{term.normal} allow"
+            action_hints = (f"  {GREEN}1{term.normal} allow"
+                            f"  {CYAN}2{term.normal} always"
+                            f"  {RED}3{term.normal} deny"
+                            f"  {DIM}↑↓{term.normal} select"
+                            f"  {DIM}Enter{term.normal} confirm")
         keys = (f"  {BLUE}Tab{term.normal} pane"
-                f"  {DIM}jk{term.normal} nav"
-                + a_hint +
-                f"  {RED}D{term.normal} deny"
-                f"  {CYAN}M{term.normal} message"
+                f"  {DIM}jk{term.normal} queue"
+                + action_hints +
+                f"  {CYAN}M{term.normal} msg"
                 f"  {YELLOW}L{term.normal} link"
                 f"  {MAGENTA}S{term.normal} settings"
-                f"  {RED}U{term.normal} unlink"
                 f"  {DIM}Q{term.normal} quit")
         E(term.move(h-2, 0) + BG2 + _pad(keys, w) + term.normal)
         E(term.move(h-1, 0) + BG2 + " " * w + term.normal)

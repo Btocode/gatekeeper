@@ -203,6 +203,33 @@ async def run() -> None:
             state.q_cursor -= 1
         state.dirty = True
 
+    # ── persistent allow (option 2) ───────────────────────────────────────────
+
+    async def resolve_persistent() -> None:
+        """Allow the current request AND save a rule so it auto-approves next time."""
+        if not queue.pending or state.q_cursor >= len(queue.pending):
+            return
+        request      = queue.pending[state.q_cursor].request
+        action_type, value = request.persistent_allow_action()
+        cfg          = state.config
+        if action_type == "bash_pattern" and value:
+            if value not in cfg.custom_allow_patterns:
+                cfg.custom_allow_patterns.append(value)
+            save_config(cfg)
+            _log({"type": "persistent_allow", "kind": "bash_pattern", "value": value,
+                  "session": request.session_id[:8], "tool": request.tool_name})
+        elif action_type == "edit_dir" and value:
+            if value not in cfg.allowed_edit_dirs:
+                cfg.allowed_edit_dirs.append(value)
+            save_config(cfg)
+            _log({"type": "persistent_allow", "kind": "edit_dir", "value": value,
+                  "session": request.session_id[:8], "tool": request.tool_name})
+        elif action_type == "auto_approve":
+            registry.toggle_auto_approve(request.session_id)
+            _log({"type": "persistent_allow", "kind": "auto_approve",
+                  "session": request.session_id[:8]})
+        await resolve("allow")
+
     # ── send message to session ────────────────────────────────────────────────
 
     async def send_message(session, text: str) -> tuple[bool, str]:
@@ -395,13 +422,15 @@ async def run() -> None:
                     break
 
                 elif k.name == "KEY_TAB" or ks == "\t":
-                    state.focus  = FOCUS_QUEUE if state.focus == FOCUS_SESSIONS else FOCUS_SESSIONS
-                    state.dirty  = True
+                    state.focus        = FOCUS_QUEUE if state.focus == FOCUS_SESSIONS else FOCUS_SESSIONS
+                    state.action_cursor = 0
+                    state.dirty        = True
 
-                elif k.name in ("KEY_UP",) or ks == "k":
-                    if state.focus == FOCUS_QUEUE:
-                        if state.q_cursor > 0:
-                            state.q_cursor -= 1
+                elif k.name == "KEY_UP":
+                    if state.focus == FOCUS_QUEUE and queue.pending:
+                        # Move action cursor upward in the detail panel
+                        if state.action_cursor > 0:
+                            state.action_cursor -= 1
                     else:
                         sessions = registry.active()
                         if state.s_cursor > 0:
@@ -410,10 +439,11 @@ async def run() -> None:
                             state.selected_session_id = sessions[state.s_cursor].session_id
                     state.dirty = True
 
-                elif k.name in ("KEY_DOWN",) or ks == "j":
-                    if state.focus == FOCUS_QUEUE:
-                        if state.q_cursor < len(queue.pending) - 1:
-                            state.q_cursor += 1
+                elif k.name == "KEY_DOWN":
+                    if state.focus == FOCUS_QUEUE and queue.pending:
+                        # Move action cursor downward in the detail panel
+                        if state.action_cursor < 2:
+                            state.action_cursor += 1
                     else:
                         sessions = registry.active()
                         if state.s_cursor < len(sessions) - 1:
@@ -421,6 +451,53 @@ async def run() -> None:
                         if sessions:
                             state.selected_session_id = sessions[state.s_cursor].session_id
                     state.dirty = True
+
+                elif ks == "k":
+                    if state.focus == FOCUS_QUEUE:
+                        if state.q_cursor > 0:
+                            state.q_cursor -= 1
+                            state.action_cursor = 0
+                    else:
+                        sessions = registry.active()
+                        if state.s_cursor > 0:
+                            state.s_cursor -= 1
+                        if sessions:
+                            state.selected_session_id = sessions[state.s_cursor].session_id
+                    state.dirty = True
+
+                elif ks == "j":
+                    if state.focus == FOCUS_QUEUE:
+                        if state.q_cursor < len(queue.pending) - 1:
+                            state.q_cursor += 1
+                            state.action_cursor = 0
+                    else:
+                        sessions = registry.active()
+                        if state.s_cursor < len(sessions) - 1:
+                            state.s_cursor += 1
+                        if sessions:
+                            state.selected_session_id = sessions[state.s_cursor].session_id
+                    state.dirty = True
+
+                elif k.name in ("KEY_ENTER",) or ks in ("\n", "\r"):
+                    if state.focus == FOCUS_QUEUE and queue.pending:
+                        if state.action_cursor == 0:
+                            await resolve("allow")
+                        elif state.action_cursor == 1:
+                            await resolve_persistent()
+                        else:
+                            await resolve("deny")
+
+                elif ks == "1":
+                    if state.focus == FOCUS_QUEUE:
+                        await resolve("allow")
+
+                elif ks == "2":
+                    if state.focus == FOCUS_QUEUE:
+                        await resolve_persistent()
+
+                elif ks == "3":
+                    if state.focus == FOCUS_QUEUE:
+                        await resolve("deny")
 
                 elif ks in ("a", "A"):
                     if state.focus == FOCUS_SESSIONS and state.selected_session_id:

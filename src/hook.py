@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 import json
 import os
+import select
 import socket
 import sys
+import time
 import uuid
 from typing import Any
 
@@ -43,28 +45,47 @@ def make_request(hook_input: dict[str, Any]) -> Request:
 
 
 def send_request(request: Request) -> dict[str, Any]:
-    # GATEKEEPER_TIMEOUT env var lets users set how long to wait for the daemon
-    # before falling back to the terminal Y/n prompt.
-    # Default: 300s (5 min). Set to 0 to always use terminal prompt.
+    # GATEKEEPER_TIMEOUT: how long to wait for the user's decision in the TUI.
+    # Default: 300s (5 min). Set to 0 for indefinite.
     wait_timeout = int(os.environ.get("GATEKEEPER_TIMEOUT", "300")) or None
 
-    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    try:
-        sock.settimeout(TIMEOUT_SECS)
-        sock.connect(SOCKET_PATH)
-        sock.settimeout(wait_timeout)
-        sock.sendall(request.to_json().encode())
-        buf = b""
-        while b"\n" not in buf:
-            chunk = sock.recv(4096)
-            if not chunk:
-                break
-            buf += chunk
-        if not buf.strip():
-            raise ValueError("Empty response from daemon")
-        return json.loads(buf.strip())
-    finally:
-        sock.close()
+    # Retry the connect up to 3 times with short back-off.  Two tool calls that
+    # fire simultaneously can race on the event loop's accept queue; a brief
+    # retry is enough to let the daemon catch up without falling back to the
+    # terminal prompt.
+    last_exc: Exception = RuntimeError("unknown")
+    for attempt in range(3):
+        if attempt:
+            time.sleep(0.4)
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            sock.settimeout(TIMEOUT_SECS)
+            sock.connect(SOCKET_PATH)
+            sock.settimeout(wait_timeout)
+            sock.sendall(request.to_json().encode())
+            buf = b""
+            while b"\n" not in buf:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                buf += chunk
+            if not buf.strip():
+                raise ValueError("Empty response from daemon")
+            return json.loads(buf.strip())
+        except ConnectionRefusedError as exc:
+            # Nothing is listening — stale socket file.  Remove it so future
+            # calls correctly detect the daemon as not running, then stop retrying.
+            try:
+                os.unlink(SOCKET_PATH)
+            except Exception:
+                pass
+            raise exc
+        except Exception as exc:
+            last_exc = exc
+        finally:
+            sock.close()
+
+    raise last_exc
 
 
 def decide_exit(response: dict[str, Any]) -> int | tuple[int, str]:
@@ -74,6 +95,9 @@ def decide_exit(response: dict[str, Any]) -> int | tuple[int, str]:
     return 0
 
 
+_TERMINAL_TIMEOUT = 30   # seconds before auto-deny when no input
+
+
 def ask_in_terminal(request: Request) -> int | tuple[int, str]:
     """Fallback: ask directly in the Claude terminal when daemon is not running."""
     tool = request.tool_name
@@ -81,18 +105,23 @@ def ask_in_terminal(request: Request) -> int | tuple[int, str]:
     try:
         with open("/dev/tty", "r+") as tty:
             tty.write(f"\n\033[33m[Permission required]\033[0m {tool}: {cmd}\n")
-            tty.write("Allow? [Y/n] ")
+            tty.write(f"Allow? [Y/n]  (auto-denies in {_TERMINAL_TIMEOUT}s if no input) ")
             tty.flush()
-            answer = tty.readline().strip().lower()
-        if answer in ("", "y", "yes"):
-            return 0
-        return 2, f"Denied in terminal: {tool}({cmd})"
+            ready, _, _ = select.select([tty], [], [], _TERMINAL_TIMEOUT)
+            if ready:
+                answer = tty.readline().strip().lower()
+                if answer in ("", "y", "yes"):
+                    return 0
+                return 2, f"Denied in terminal: {tool}({cmd})"
+            tty.write(f"\n\033[31mAuto-denied: no response within {_TERMINAL_TIMEOUT}s\033[0m\n")
+            tty.flush()
+            return 2, f"Auto-denied (timeout): {tool}({cmd})"
     except Exception:
         return 0  # can't open tty — allow
 
 
-# Only these tools have side effects — everything else auto-allows
-NEEDS_PERMISSION = {"Bash", "Edit", "NotebookEdit", "Agent"}
+# All tools with side effects — anything not listed here auto-allows
+NEEDS_PERMISSION = {"Bash", "Edit", "Write", "NotebookEdit", "Agent"}
 
 
 def main() -> None:
@@ -102,12 +131,23 @@ def main() -> None:
 
         if request.tool_name not in NEEDS_PERMISSION:
             sys.exit(0)
+
+        daemon_running = os.path.exists(SOCKET_PATH)
         try:
             response = send_request(request)
             result   = decide_exit(response)
         except Exception:
-            # Daemon not reachable — fall back to terminal prompt
-            result = ask_in_terminal(request)
+            if daemon_running:
+                # Socket exists — daemon is running but unreachable after retries.
+                # The user is likely watching the gatekeeper TUI, not the terminal,
+                # so a terminal Y/n prompt would block silently forever.  Deny to
+                # be safe; the user can retry the action.
+                result = 2, (f"Gatekeeper unreachable for {request.tool_name}"
+                             f"({request.summary_command()[:40]}) — denied")
+            else:
+                # Daemon not running — fall back to the session terminal prompt.
+                result = ask_in_terminal(request)
+
         if isinstance(result, tuple):
             code, message = result
             print(message)
