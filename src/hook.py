@@ -72,14 +72,8 @@ def send_request(request: Request) -> dict[str, Any]:
             if not buf.strip():
                 raise ValueError("Empty response from daemon")
             return json.loads(buf.strip())
-        except ConnectionRefusedError as exc:
-            # Nothing is listening — stale socket file.  Remove it so future
-            # calls correctly detect the daemon as not running, then stop retrying.
-            try:
-                os.unlink(SOCKET_PATH)
-            except Exception:
-                pass
-            raise exc
+        except ConnectionRefusedError:
+            raise  # nothing listening — don't retry, propagate immediately
         except Exception as exc:
             last_exc = exc
         finally:
@@ -132,20 +126,22 @@ def main() -> None:
         if request.tool_name not in NEEDS_PERMISSION:
             sys.exit(0)
 
-        daemon_running = os.path.exists(SOCKET_PATH)
         try:
             response = send_request(request)
             result   = decide_exit(response)
+        except ConnectionRefusedError:
+            # Nothing is listening on the socket — daemon not running or stale
+            # socket file left behind after a crash.  Fall back to terminal.
+            result = ask_in_terminal(request)
         except Exception:
-            if daemon_running:
-                # Socket exists — daemon is running but unreachable after retries.
-                # The user is likely watching the gatekeeper TUI, not the terminal,
-                # so a terminal Y/n prompt would block silently forever.  Deny to
-                # be safe; the user can retry the action.
+            if os.path.exists(SOCKET_PATH):
+                # Socket exists but daemon unreachable after retries — deny safely.
+                # User is likely watching the gatekeeper TUI; a hidden terminal
+                # prompt would block Claude indefinitely.
                 result = 2, (f"Gatekeeper unreachable for {request.tool_name}"
                              f"({request.summary_command()[:40]}) — denied")
             else:
-                # Daemon not running — fall back to the session terminal prompt.
+                # No socket at all — daemon was never started.
                 result = ask_in_terminal(request)
 
         if isinstance(result, tuple):
