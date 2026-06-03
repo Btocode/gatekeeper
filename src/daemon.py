@@ -10,14 +10,27 @@ import json
 import os
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
-LOG_DIR  = os.path.expanduser("~/.claude/perm-logs")
+LOG_DIR      = os.path.expanduser("~/.claude/perm-logs")
+LOG_RETENTION = 30  # days
+
 os.makedirs(LOG_DIR, exist_ok=True)
 
 
 def _log_file() -> str:
     return os.path.join(LOG_DIR, f"{datetime.now().strftime('%Y-%m-%d')}.log")
+
+
+def _prune_logs() -> None:
+    """Delete log files older than LOG_RETENTION days."""
+    cutoff = (datetime.now() - timedelta(days=LOG_RETENTION)).strftime("%Y-%m-%d")
+    try:
+        for fname in os.listdir(LOG_DIR):
+            if fname.endswith(".log") and fname.replace(".log", "") < cutoff:
+                os.unlink(os.path.join(LOG_DIR, fname))
+    except Exception:
+        pass
 
 import blessed
 
@@ -104,6 +117,7 @@ def _log(entry: dict) -> None:
 
 
 async def run() -> None:
+    _prune_logs()
     loop     = asyncio.get_event_loop()
     queue    = RequestQueue()
     registry = SessionRegistry()
