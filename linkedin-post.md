@@ -15,7 +15,7 @@ What it does:
 → Auto-approve trusted sessions so routine calls never interrupt you
 → Falls back to a terminal prompt if the daemon isn't running
 
-[GIF here]
+![Gatekeeper demo](https://raw.githubusercontent.com/Btocode/gatekeeper/main/assets/gatekeeper-demo.gif)
 
 I'm Afsan — I build tools that make AI development less chaotic.
 

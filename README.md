@@ -13,7 +13,7 @@ When you run multiple Claude Code sessions across terminals or IDE windows, each
 
 ## What it looks like
 
-![Gatekeeper screenshot](assets/screenshot.png)
+![Gatekeeper demo](assets/gatekeeper-demo.gif)
 
 **Left pane** — all active Claude sessions with status badges (`[auto]` = auto-approve enabled)  
 **Middle pane** — pending permission requests with age timer  

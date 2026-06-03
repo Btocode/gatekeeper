@@ -8,7 +8,7 @@ And there was no single place to see what Claude was doing across all of them.
 
 So I built **Gatekeeper** — a TUI daemon that intercepts every Claude Code tool call and routes it to one unified approval dashboard.
 
-[GIF HERE]
+![Gatekeeper demo](https://raw.githubusercontent.com/Btocode/gatekeeper/main/assets/gatekeeper-demo.gif)
 
 ---
 
