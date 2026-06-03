@@ -133,7 +133,7 @@ class UIState:
     s_cursor:           int  = 0
     selected_session_id: str = ""   # authoritative selection — survives reorder
 
-    action_cursor: int  = 0   # 0=Yes (allow once)  1=Yes always (persistent)  2=No (deny)
+    action_cursor: int  = 0   # 0=Never (deny)  1=Yes Forever (persistent)  2=Yes for session only
 
     composing:    bool = False
     message_buf:  str  = ""
@@ -438,9 +438,9 @@ class Renderer:
         dl.append(f"  {DIM}Do you want to proceed?{term.normal}")
         dl.append("")
         options = [
-            ("Yes",                           GREEN),
-            (r.persistent_allow_label(),      CYAN),
-            ("No",                            RED),
+            ("Never",                          RED),
+            (r.persistent_allow_label(),       CYAN),
+            ("Yes, for this session only",     GREEN),
         ]
         for i, (label, color) in enumerate(options):
             sel   = (i == st.action_cursor)
@@ -506,7 +506,7 @@ class Renderer:
             f" {BLUE}{term.bold}GATEKEEPER{term.normal}",
             "",
             f" {DIM}Listening on:{term.normal}",
-            f" {CYAN}/tmp/claude-perm-{os.environ.get('USER','user')}.sock{term.normal}",
+            f" {CYAN}/tmp/gatekeeper-{os.environ.get('USER','user')}.sock{term.normal}",
             "",
             f" {DIM}Bash / Edit / Agent calls appear here.{term.normal}",
             "",
@@ -653,9 +653,9 @@ class Renderer:
         if st.focus == FOCUS_SESSIONS:
             action_hints = f"  {YELLOW}A{term.normal} toggle auto  {RED}U{term.normal} unlink"
         else:
-            action_hints = (f"  {GREEN}1{term.normal} allow"
-                            f"  {CYAN}2{term.normal} always"
-                            f"  {RED}3{term.normal} deny"
+            action_hints = (f"  {RED}1{term.normal} never"
+                            f"  {CYAN}2{term.normal} forever"
+                            f"  {GREEN}3{term.normal} session"
                             f"  {DIM}↑↓{term.normal} select"
                             f"  {DIM}Enter{term.normal} confirm")
         keys = (f"  {BLUE}Tab{term.normal} pane"

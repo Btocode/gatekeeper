@@ -36,24 +36,24 @@ class Request:
         return json.dumps(self.tool_input)[:60]
 
     def persistent_allow_label(self) -> str:
-        """Generate the dynamic 'Yes, always allow...' option label."""
+        """Generate the 'Yes Forever' option label — describes what rule gets saved."""
         home = os.path.expanduser("~")
         if self.tool_name == "Bash":
             cmd = self.tool_input.get("command", "").strip()
             first_word = os.path.basename(cmd.split()[0]) if cmd else "this command"
-            return f'Yes, allow "{first_word}" commands from this project'
+            return f'Yes forever — always allow "{first_word}" commands'
         if self.tool_name in ("Edit", "Write"):
             path = self.tool_input.get("file_path", self.cwd)
             d = os.path.dirname(os.path.abspath(path)).replace(home, "~")
             verb = "edits in" if self.tool_name == "Edit" else "writes to"
-            return f"Yes, allow {verb} {d}/ from this project"
+            return f"Yes forever — allow {verb} {d}/"
         if self.tool_name == "NotebookEdit":
             path = self.tool_input.get("notebook_path", self.cwd)
             d = os.path.dirname(os.path.abspath(path)).replace(home, "~")
-            return f"Yes, allow notebook edits in {d}/ from this project"
+            return f"Yes forever — allow notebook edits in {d}/"
         if self.tool_name == "Agent":
-            return "Yes, auto-approve this session from now on"
-        return "Yes, always allow this from this project"
+            return "Yes forever — auto-approve this session always"
+        return "Yes forever — always allow this"
 
     def persistent_allow_action(self) -> tuple[str, str]:
         """Return (action_type, value) describing the persistent rule to save.

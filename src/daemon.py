@@ -221,6 +221,35 @@ async def run() -> None:
             state.q_cursor -= 1
         state.dirty = True
 
+    # ── session-only allow (option 3) ────────────────────────────────────────
+
+    async def resolve_session_only() -> None:
+        """Allow + add rule to in-memory config only — not saved, forgotten on restart."""
+        if not queue.pending or state.q_cursor >= len(queue.pending):
+            return
+        request      = queue.pending[state.q_cursor].request
+        action_type, value = request.persistent_allow_action()
+        cfg          = state.config
+
+        if action_type == "bash_pattern" and value:
+            if value not in cfg.custom_allow_patterns:
+                cfg.custom_allow_patterns.append(value)
+            _log({"type": "session_allow", "kind": "bash_pattern", "value": value,
+                  "session": request.session_id[:8], "tool": request.tool_name})
+
+        elif action_type == "edit_dir" and value:
+            if value not in cfg.allowed_edit_dirs:
+                cfg.allowed_edit_dirs.append(value)
+            _log({"type": "session_allow", "kind": "edit_dir", "value": value,
+                  "session": request.session_id[:8], "tool": request.tool_name})
+
+        elif action_type == "auto_approve":
+            registry.auto_approve.add(request.session_id)
+            _log({"type": "session_allow", "kind": "auto_approve",
+                  "session": request.session_id[:8]})
+
+        await resolve("allow")
+
     # ── persistent allow (option 2) ───────────────────────────────────────────
 
     async def resolve_persistent() -> None:
@@ -516,15 +545,15 @@ async def run() -> None:
                 elif k.name in ("KEY_ENTER",) or ks in ("\n", "\r"):
                     if state.focus == FOCUS_QUEUE and queue.pending:
                         if state.action_cursor == 0:
-                            await resolve("allow")
+                            await resolve("deny")
                         elif state.action_cursor == 1:
                             await resolve_persistent()
                         else:
-                            await resolve("deny")
+                            await resolve_session_only()
 
                 elif ks == "1":
                     if state.focus == FOCUS_QUEUE:
-                        await resolve("allow")
+                        await resolve("deny")
 
                 elif ks == "2":
                     if state.focus == FOCUS_QUEUE:
@@ -532,7 +561,7 @@ async def run() -> None:
 
                 elif ks == "3":
                     if state.focus == FOCUS_QUEUE:
-                        await resolve("deny")
+                        await resolve_session_only()
 
                 elif ks in ("a", "A"):
                     if state.focus == FOCUS_SESSIONS and state.selected_session_id:
@@ -543,7 +572,7 @@ async def run() -> None:
                               "enabled": enabled})
                         state.dirty = True
                     else:
-                        await resolve("allow")
+                        await resolve_session_only()
 
                 elif ks in ("d", "D"):
                     await resolve("deny")
