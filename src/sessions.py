@@ -634,7 +634,8 @@ def list_injectable_windows(terminal_pid: int) -> list[tuple[int, str]]:
     """Return all non-daemon windows for the terminal emulator, for user to pick from."""
     windows = _x11_windows_for_pid(terminal_pid)
     return [(wid, title) for wid, title in windows
-            if "claude-perm" not in title.lower()
+            if "gatekeeper" not in title.lower()
+            and "claude-perm" not in title.lower()
             and "perm-manager" not in title.lower()]
 
 
@@ -665,7 +666,8 @@ def send_message_to_session(session: Session, text: str) -> tuple[bool, str]:
 
     # Exclude the daemon window and other perm-manager windows
     eligible = [(wid, title) for wid, title in windows
-                if "claude-perm" not in title.lower()
+                if "gatekeeper" not in title.lower()
+                and "claude-perm" not in title.lower()
                 and "perm-manager" not in title.lower()]
 
     if not eligible:

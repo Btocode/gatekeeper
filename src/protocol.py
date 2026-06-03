@@ -4,7 +4,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-SOCKET_PATH = f"/tmp/claude-perm-{os.environ.get('USER', 'user')}.sock"
+SOCKET_PATH = f"/tmp/gatekeeper-{os.environ.get('USER', 'user')}.sock"
 TIMEOUT_SECS = 2
 
 

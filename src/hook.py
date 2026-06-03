@@ -84,7 +84,7 @@ def send_request(request: Request) -> dict[str, Any]:
 
 def decide_exit(response: dict[str, Any]) -> int | tuple[int, str]:
     if response.get("decision") == "deny":
-        reason = response.get("reason", "Denied by user via claude-perm-daemon")
+        reason = response.get("reason", "Denied by user via gatekeeper")
         return 2, reason
     return 0
 
