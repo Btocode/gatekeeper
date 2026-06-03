@@ -133,7 +133,7 @@ class UIState:
     s_cursor:           int  = 0
     selected_session_id: str = ""   # authoritative selection — survives reorder
 
-    action_cursor: int  = 0   # 0=Never (deny)  1=Yes Forever (persistent)  2=Yes for session only
+    action_cursor: int  = 0   # 0=Yes (allow once)  1=Yes for session only  2=No (deny)
 
     composing:    bool = False
     message_buf:  str  = ""
@@ -438,9 +438,9 @@ class Renderer:
         dl.append(f"  {DIM}Do you want to proceed?{term.normal}")
         dl.append("")
         options = [
-            ("Never",                          RED),
-            (r.persistent_allow_label(),       CYAN),
-            ("Yes, for this session only",     GREEN),
+            ("Yes",                            GREEN),
+            ("Yes, for this session only",     CYAN),
+            ("No",                             RED),
         ]
         for i, (label, color) in enumerate(options):
             sel   = (i == st.action_cursor)
@@ -653,9 +653,9 @@ class Renderer:
         if st.focus == FOCUS_SESSIONS:
             action_hints = f"  {YELLOW}A{term.normal} toggle auto  {RED}U{term.normal} unlink"
         else:
-            action_hints = (f"  {RED}1{term.normal} never"
-                            f"  {CYAN}2{term.normal} forever"
-                            f"  {GREEN}3{term.normal} session"
+            action_hints = (f"  {GREEN}1{term.normal} yes"
+                            f"  {CYAN}2{term.normal} session"
+                            f"  {RED}3{term.normal} no"
                             f"  {DIM}↑↓{term.normal} select"
                             f"  {DIM}Enter{term.normal} confirm")
         keys = (f"  {BLUE}Tab{term.normal} pane"

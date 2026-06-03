@@ -112,12 +112,12 @@ export GATEKEEPER_TIMEOUT=0
 | `Tab` | any | Switch focus between Sessions and Queue |
 | `j` / `k` | any | Navigate queue items or sessions |
 | `↑` / `↓` | Queue | Move the approval cursor (1 / 2 / 3) |
-| `1` | Queue | Never — deny this request |
-| `2` | Queue | Yes forever — saves rule to config + Claude Code allowlist |
-| `3` | Queue | Yes, for this session only — allows without saving permanently |
+| `1` | Queue | Yes — allow this request |
+| `2` | Queue | Yes, for this session only — allows without saving permanently |
+| `3` | Queue | No — deny this request |
 | `Enter` | Queue | Confirm highlighted option |
-| `A` | Queue | Yes, for this session only (shortcut) |
-| `D` | Queue | Never / deny (shortcut) |
+| `A` | Queue | Yes — allow (shortcut) |
+| `D` | Queue | No — deny (shortcut) |
 | `A` | Sessions | Toggle auto-approve for the selected session |
 | `M` | any | Send a message to the selected session |
 | `L` | Sessions | Link the session to a terminal window |

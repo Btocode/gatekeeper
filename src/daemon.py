@@ -545,23 +545,23 @@ async def run() -> None:
                 elif k.name in ("KEY_ENTER",) or ks in ("\n", "\r"):
                     if state.focus == FOCUS_QUEUE and queue.pending:
                         if state.action_cursor == 0:
-                            await resolve("deny")
+                            await resolve("allow")
                         elif state.action_cursor == 1:
-                            await resolve_persistent()
-                        else:
                             await resolve_session_only()
+                        else:
+                            await resolve("deny")
 
                 elif ks == "1":
                     if state.focus == FOCUS_QUEUE:
-                        await resolve("deny")
+                        await resolve("allow")
 
                 elif ks == "2":
                     if state.focus == FOCUS_QUEUE:
-                        await resolve_persistent()
+                        await resolve_session_only()
 
                 elif ks == "3":
                     if state.focus == FOCUS_QUEUE:
-                        await resolve_session_only()
+                        await resolve("deny")
 
                 elif ks in ("a", "A"):
                     if state.focus == FOCUS_SESSIONS and state.selected_session_id:
@@ -572,7 +572,7 @@ async def run() -> None:
                               "enabled": enabled})
                         state.dirty = True
                     else:
-                        await resolve_session_only()
+                        await resolve("allow")
 
                 elif ks in ("d", "D"):
                     await resolve("deny")
