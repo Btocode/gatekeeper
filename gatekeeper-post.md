@@ -158,8 +158,8 @@ That last point matters: Claude Code's own hardcoded prompts for sensitive paths
 ## Installation
 
 ```bash
-git clone https://github.com/Btocode/claude-perm-kitty
-cd claude-perm-kitty
+git clone https://github.com/Btocode/gatekeeper
+cd gatekeeper
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 bash install.sh
@@ -185,7 +185,7 @@ Gatekeeper changed that. Trusted sessions handle routine calls without interrupt
 
 It's open source. MIT licensed.
 
-👉 [github.com/Btocode/claude-perm-kitty](https://github.com/Btocode/claude-perm-kitty)
+👉 [github.com/Btocode/gatekeeper](https://github.com/Btocode/gatekeeper)
 
 If you run Claude Code with multiple sessions, give it a try. And if you build tools like this — follow me, more coming.
 

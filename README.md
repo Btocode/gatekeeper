@@ -48,8 +48,8 @@ When you run multiple Claude Code sessions across terminals or IDE windows, each
 ## Installation
 
 ```bash
-git clone https://github.com/Btocode/claude-perm-kitty
-cd claude-perm-kitty
+git clone https://github.com/Btocode/gatekeeper
+cd gatekeeper
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
