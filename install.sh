@@ -11,7 +11,7 @@ mkdir -p "$BIN_DIR"
 cat > "$BIN_DIR/gatekeeper" << WRAPPER
 #!/usr/bin/env bash
 source "$SCRIPT_DIR/.venv/bin/activate"
-if [[ "${1:-}" == "stats" ]]; then
+if [[ "\${1:-}" == "stats" ]]; then
     shift
     exec python "$SCRIPT_DIR/src/stats.py" "\$@"
 fi
