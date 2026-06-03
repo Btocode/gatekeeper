@@ -7,6 +7,56 @@ SETTINGS="$HOME/.claude/settings.json"
 
 mkdir -p "$BIN_DIR"
 
+# Handle uninstall
+if [[ "${1:-}" == "uninstall" ]]; then
+    python3 - << PYEOF
+import json, os
+
+settings_path = "$SETTINGS"
+try:
+    with open(settings_path) as f:
+        settings = json.load(f)
+
+    # Remove hook
+    hooks = settings.get("hooks", {})
+    pre   = hooks.get("PreToolUse", [])
+    hooks["PreToolUse"] = [e for e in pre if not any(
+        "gatekeeper-hook" in h.get("command","") or "claude-perm-hook" in h.get("command","")
+        for h in e.get("hooks",[])
+    )]
+
+    # Remove blanket allow rules added by install
+    perms = settings.get("permissions", {})
+    added = [
+        "Bash(**)", "Edit(**)", "Write(**)", "Read(**)",
+        "WebSearch(**)", "WebFetch(**)", "TodoWrite", "Agent(**)",
+        "NotebookRead(**)", "NotebookEdit(**)",
+    ]
+    perms["allow"] = [r for r in perms.get("allow", []) if r not in added]
+
+    # Restore default permission mode
+    perms.pop("defaultMode", None)
+    settings.pop("skipDangerousModePermissionPrompt", None)
+
+    with open(settings_path, "w") as f:
+        json.dump(settings, f, indent=2)
+        f.write("\n")
+    print("Removed hook and permission overrides from settings.json")
+except Exception as e:
+    print(f"Warning: could not patch settings.json: {e}")
+
+# Remove wrapper scripts
+for name in ["gatekeeper", "gatekeeper-hook", "gatekeeper-stats"]:
+    path = "$BIN_DIR/" + name
+    if os.path.exists(path):
+        os.unlink(path)
+        print(f"Removed {path}")
+PYEOF
+    echo ""
+    echo "Uninstall complete. Claude Code's own permission dialogs are restored."
+    exit 0
+fi
+
 # Install daemon wrapper (also dispatches: gatekeeper stats [days|all])
 cat > "$BIN_DIR/gatekeeper" << WRAPPER
 #!/usr/bin/env bash
@@ -14,6 +64,9 @@ source "$SCRIPT_DIR/.venv/bin/activate"
 if [[ "\${1:-}" == "stats" ]]; then
     shift
     exec python "$SCRIPT_DIR/src/stats.py" "\$@"
+fi
+if [[ "\${1:-}" == "uninstall" ]]; then
+    exec bash "$SCRIPT_DIR/install.sh" uninstall
 fi
 exec python "$SCRIPT_DIR/src/daemon.py" "\$@"
 WRAPPER

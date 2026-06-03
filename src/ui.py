@@ -335,7 +335,8 @@ class Renderer:
         if hidx < len(st.history):
             e    = list(reversed(st.history))[hidx]
             icon = f"{GREEN}A{term.normal}" if e.decision == "allow" else f"{RED}D{term.normal}"
-            line = f" {icon} {_tool(e.tool_name)} {DIM}{_clamp(e.command_summary, inner - 8)}{term.normal}"
+            saved = f" {MAGENTA}+rule{term.normal}" if e.rule_saved else ""
+            line = f" {icon}{saved} {_tool(e.tool_name)} {DIM}{_clamp(e.command_summary, inner - 8 - (5 if e.rule_saved else 0))}{term.normal}"
             return BG + _pad(line, w) + term.normal
 
         return BG + " " * w + term.normal

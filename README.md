@@ -7,6 +7,7 @@ When you run multiple Claude Code sessions across terminals or IDE windows, each
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![Platform](https://img.shields.io/badge/platform-Linux%20%28X11%29-lightgrey)
 ![License](https://img.shields.io/badge/license-MIT-green)
+[![GitHub Stars](https://img.shields.io/github/stars/Btocode/gatekeeper?style=social)](https://github.com/Btocode/gatekeeper)
 
 ---
 
@@ -262,7 +263,11 @@ If Gatekeeper is not running, the hook falls back to a `Y/n` prompt in the Claud
 
 ## Uninstall
 
-Remove the `hooks` entry and reset `permissions.defaultMode` in `~/.claude/settings.json`. Claude Code's own permission dialogs will return.
+```bash
+gatekeeper uninstall
+```
+
+Removes the hook, blanket allow rules, and wrapper scripts. Claude Code's own permission dialogs are restored automatically.
 
 ---
 

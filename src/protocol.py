@@ -108,6 +108,7 @@ class HistoryEntry:
     command_summary: str
     decision: str
     timestamp: float = field(default_factory=time.time)
+    rule_saved: str = ""   # non-empty when a persistent rule was saved
 
     def short_session(self) -> str:
         return self.session_id[:6] if self.session_id else "unknown"

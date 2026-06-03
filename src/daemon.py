@@ -200,7 +200,7 @@ async def run() -> None:
 
     # ── resolve ───────────────────────────────────────────────────────────────
 
-    async def resolve(decision: str, reason: str = "") -> None:
+    async def resolve(decision: str, reason: str = "", rule_saved: str = "") -> None:
         if not queue.pending or state.q_cursor >= len(queue.pending):
             return
         item = queue.pending[state.q_cursor]
@@ -228,6 +228,7 @@ async def run() -> None:
             tool_name=r.tool_name,
             command_summary=r.summary_command(),
             decision=decision,
+            rule_saved=rule_saved,
         ))
         registry.touch(r.session_id, r.cwd, r.tty_path)
         queue.remove(r.id)
@@ -306,7 +307,7 @@ async def run() -> None:
         if cc_pattern:
             _add_to_claude_allowlist(cc_pattern)
 
-        await resolve("allow")
+        await resolve("allow", rule_saved=value or "")
 
     # ── send message to session ────────────────────────────────────────────────
 
