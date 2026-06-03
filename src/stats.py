@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-perm-stats — show permission grant statistics from daily logs.
+gatekeeper stats — show permission grant statistics from daily logs.
 Usage:
-  perm-stats           # today
-  perm-stats 7         # last 7 days
-  perm-stats all       # everything
+  gatekeeper stats           # today
+  gatekeeper stats 7         # last 7 days
+  gatekeeper stats all       # everything
 """
 import json
 import os

@@ -70,7 +70,7 @@ bash install.sh
 Open a dedicated terminal and run:
 
 ```bash
-claude-perm-kitty
+gatekeeper
 ```
 
 Start your Claude Code sessions anywhere — other terminals, VS Code, JetBrains, anywhere. Every `Bash`, `Edit`, `Write`, or `Agent` call will appear in Gatekeeper.
@@ -191,9 +191,9 @@ Message injection works when each Claude session runs in its own terminal **wind
 ## Stats
 
 ```bash
-perm-stats          # today
-perm-stats 7        # last 7 days
-perm-stats all      # all time
+gatekeeper stats          # today
+gatekeeper stats 7        # last 7 days
+gatekeeper stats all      # all time
 ```
 
 ```
@@ -251,9 +251,9 @@ If Gatekeeper is not running, the hook falls back to a `Y/n` prompt in the Claud
 
 | Path | Purpose |
 |------|---------|
-| `~/.claude/bin/claude-perm-kitty` | Gatekeeper daemon |
-| `~/.claude/bin/claude-perm-hook-kitty` | Hook called by Claude Code |
-| `~/.claude/bin/perm-stats` | Stats command |
+| `~/.claude/bin/gatekeeper` | Gatekeeper daemon |
+| `~/.claude/bin/gatekeeper-hook` | Hook called by Claude Code |
+| `~/.claude/bin/gatekeeper-stats` | Stats backend (`gatekeeper stats`) |
 | `~/.claude/perm-logs/YYYY-MM-DD.log` | Daily decision logs |
 | `~/.claude/perm-window-map.json` | Session → window links |
 | `~/.claude/perm-auto-approve.json` | Auto-approve session list |

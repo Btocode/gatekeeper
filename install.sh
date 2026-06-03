@@ -7,36 +7,40 @@ SETTINGS="$HOME/.claude/settings.json"
 
 mkdir -p "$BIN_DIR"
 
-# Install daemon wrapper
-cat > "$BIN_DIR/claude-perm-kitty" << WRAPPER
+# Install daemon wrapper (also dispatches: gatekeeper stats [days|all])
+cat > "$BIN_DIR/gatekeeper" << WRAPPER
 #!/usr/bin/env bash
 source "$SCRIPT_DIR/.venv/bin/activate"
+if [[ "${1:-}" == "stats" ]]; then
+    shift
+    exec python "$SCRIPT_DIR/src/stats.py" "\$@"
+fi
 exec python "$SCRIPT_DIR/src/daemon.py" "\$@"
 WRAPPER
-chmod +x "$BIN_DIR/claude-perm-kitty"
+chmod +x "$BIN_DIR/gatekeeper"
 
-# Install stats wrapper
-cat > "$BIN_DIR/perm-stats" << WRAPPER
+# Install stats wrapper (invoked as: gatekeeper stats [days|all])
+cat > "$BIN_DIR/gatekeeper-stats" << WRAPPER
 #!/usr/bin/env bash
 source "$SCRIPT_DIR/.venv/bin/activate"
 exec python "$SCRIPT_DIR/src/stats.py" "\$@"
 WRAPPER
-chmod +x "$BIN_DIR/perm-stats"
+chmod +x "$BIN_DIR/gatekeeper-stats"
 
 # Install hook wrapper (reuses same hook protocol)
-cat > "$BIN_DIR/claude-perm-hook-kitty" << WRAPPER
+cat > "$BIN_DIR/gatekeeper-hook" << WRAPPER
 #!/usr/bin/env bash
 source "$SCRIPT_DIR/.venv/bin/activate"
 exec python "$SCRIPT_DIR/src/hook.py" "\$@"
 WRAPPER
-chmod +x "$BIN_DIR/claude-perm-hook-kitty"
+chmod +x "$BIN_DIR/gatekeeper-hook"
 
 # Patch settings.json
 python3 - << PYEOF
 import json, sys
 
 settings_path = "$SETTINGS"
-hook_cmd = "$BIN_DIR/claude-perm-hook-kitty"
+hook_cmd = "$BIN_DIR/gatekeeper-hook"
 
 with open(settings_path) as f:
     settings = json.load(f)
@@ -46,7 +50,8 @@ pre   = hooks.setdefault("PreToolUse", [])
 
 # Remove old claude-perm-hook entry if present, add kitty one
 pre[:] = [e for e in pre if not any(
-    "claude-perm-hook" in h.get("command","") for h in e.get("hooks",[])
+    "gatekeeper-hook" in h.get("command","") or "claude-perm-hook" in h.get("command","")
+    for h in e.get("hooks",[])
 )]
 
 pre.append({"matcher": "", "hooks": [{"type": "command", "command": hook_cmd}]})
@@ -83,5 +88,6 @@ echo ""
 echo "Install complete."
 echo ""
 echo "Usage:"
-echo "  Open Kitty and run:  claude-perm-kitty"
+echo "  Open a terminal and run:  gatekeeper"
+echo "  Stats:                    gatekeeper stats [days|all]"
 echo "  ↑↓ / j k  navigate   A allow   D deny   Q quit"
